@@ -1,0 +1,37 @@
+[project]
+name = "compta-auto"
+version = "0.1.0"
+description = "Local accounting mail extraction and document renaming automation."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "jinja2>=3.1.4",
+    "pydantic>=2.8.0",
+    "pydantic-settings>=2.4.0",
+    "python-multipart>=0.0.9",
+    "uvicorn>=0.30.0",
+]
+
+[project.optional-dependencies]
+llm = [
+    "openai>=1.30.0",
+]
+docs = [
+    "pdfplumber>=0.11.4",
+    "pillow>=10.4.0",
+    "pytesseract>=0.3.13",
+]
+dev = [
+    "pytest>=8.3.0",
+]
+
+[project.scripts]
+compta-auto = "compta_auto.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

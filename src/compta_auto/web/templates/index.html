@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Compta Auto</title>
+    <link rel="stylesheet" href="/static/styles.css?v=2">
+    <script src="/static/app.js?v=8" defer></script>
+  </head>
+  <body>
+    <header>
+      <div class="header-left">
+        <h1>Compta Auto</h1>
+        <span class="header-stats">
+          {% set triage_count = mails|selectattr("status", "equalto", "mail_triage_needed")|list|length %}
+          {% set review_count = documents|selectattr("status", "equalto", "rename_review_needed")|list|length + documents|selectattr("status", "equalto", "renamed")|list|length %}
+          {% if triage_count %}<span class="badge badge-warning">{{ triage_count }} triage</span>{% endif %}
+          {% if review_count %}<span class="badge badge-info">{{ review_count }} review</span>{% endif %}
+        </span>
+      </div>
+      <div class="header-actions">
+        <form method="post" action="/scan" class="header-form">
+          <label>
+            <input name="months" type="number" min="1" max="24" value="1" title="Months to scan">
+          </label>
+          <button type="submit">⟳ Scan mail</button>
+        </form>
+        <form method="post" action="/scan-folder" class="header-form" id="scan-folder-form">
+          <input type="hidden" name="folder" id="scan-folder-path" value="{{ last_scan_folder }}">
+          <button type="button" id="pick-folder-btn" class="btn btn-outline btn-sm" title="{{ last_scan_folder or 'Click to select folder' }}">
+            📂 <span id="pick-folder-label">{{ last_scan_folder.split('/')[-1] if last_scan_folder else 'Pick folder…' }}</span>
+          </button>
+          <select name="timespan" title="Only scan files modified within this period">
+            {% if last_scan_folder_date %}
+            <option value="since_last" selected>Since last scan</option>
+            {% endif %}
+            <option value="7">1 week</option>
+            <option value="14">2 weeks</option>
+            <option value="21">3 weeks</option>
+            <option value="28">4 weeks</option>
+            <option value="30"{% if not last_scan_folder_date %} selected{% endif %}>1 month</option>
+            <option value="60">2 months</option>
+            <option value="90">3 months</option>
+          </select>
+          <button type="submit"{% if not last_scan_folder %} disabled{% endif %} id="scan-folder-submit">📁 Scan</button>
+          {% if last_scan_folder_date %}
+          <span class="scan-last-date" title="{{ last_scan_folder_date }}">Last: {{ last_scan_folder_date[:10] }}</span>
+          {% endif %}
+        </form>
+      </div>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab active" role="tab" aria-selected="true" data-tab="triage">
+        Triage
+        {% if triage_count %}<span class="tab-count">{{ triage_count }}</span>{% endif %}
+      </button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="documents">
+        Documents
+        {% if review_count %}<span class="tab-count">{{ review_count }}</span>{% endif %}
+      </button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="processed">Processed</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="providers">Providers</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="settings">Settings</button>
+    </nav>
+
+    <main>
+      <!-- TRIAGE TAB -->
+      <div class="tab-panel active" id="panel-triage" role="tabpanel">
+        {% set triage_mails = mails|selectattr("status", "equalto", "mail_triage_needed")|list %}
+        {% set domain_suffix = "@" + settings.accounting_domain %}
+        {% set accounting_mails = [] %}
+        {% set other_mails = [] %}
+        {% for mail in triage_mails %}
+          {% if domain_suffix in mail.recipients_display %}
+            {% set _ = accounting_mails.append(mail) %}
+          {% else %}
+            {% set _ = other_mails.append(mail) %}
+          {% endif %}
+        {% endfor %}
+
+        {% if not triage_mails %}
+        <div class="empty-state">
+          <p>✓ No mails awaiting triage</p>
+        </div>
+        {% else %}
+        <div class="subtabs" role="tablist">
+          <button class="subtab active" role="tab" aria-selected="true" data-subtab="triage-accounting">
+            {{ settings.accounting_domain }}
+            {% if accounting_mails %}<span class="subtab-count">{{ accounting_mails|length }}</span>{% endif %}
+          </button>
+          <button class="subtab" role="tab" aria-selected="false" data-subtab="triage-other">
+            Other inboxes
+            {% if other_mails %}<span class="subtab-count">{{ other_mails|length }}</span>{% endif %}
+          </button>
+          <button class="subtab" role="tab" aria-selected="false" data-subtab="triage-all">
+            All
+            <span class="subtab-count">{{ triage_mails|length }}</span>
+          </button>
+        </div>
+
+        <div class="subtab-panel active" id="subpanel-triage-accounting">
+          {% if not accounting_mails %}
+          <div class="empty-state"><p>No triage mails for {{ settings.accounting_domain }}</p></div>
+          {% else %}
+          <div class="card-list">
+            {% for mail in accounting_mails %}
+            {% include "partials/mail_card.html" %}
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="subtab-panel" id="subpanel-triage-other">
+          {% if not other_mails %}
+          <div class="empty-state"><p>No triage mails for other inboxes</p></div>
+          {% else %}
+          <div class="card-list">
+            {% for mail in other_mails %}
+            {% include "partials/mail_card.html" %}
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="subtab-panel" id="subpanel-triage-all">
+          <div class="card-list">
+            {% for mail in triage_mails %}
+            {% include "partials/mail_card.html" %}
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- DOCUMENTS TAB -->
+      <div class="tab-panel" id="panel-documents" role="tabpanel">
+        {% set triage_docs = documents|selectattr("status", "equalto", "rename_review_needed")|list %}
+        {% set renamed_docs = documents|selectattr("status", "equalto", "renamed")|list %}
+        {% set included_docs = documents|selectattr("status", "equalto", "doc_included")|list %}
+        {% set skipped_docs = documents|selectattr("status", "equalto", "review_ignored")|list %}
+
+        <!-- RENAME TRIAGE -->
+        {% if triage_docs %}
+        <section class="doc-triage-section">
+          <h2 class="section-title">📋 Rename triage <span class="count-label">{{ triage_docs|length }}</span></h2>
+          <div class="doc-triage-grid">
+            {% for document in triage_docs %}
+            <article class="doc-triage-card">
+              <button class="preview doc-triage-preview" type="button"
+                data-preview-url="{{ document.raw_preview_url }}" data-open-url="{{ document.raw_open_url }}"
+                data-preview-name="{{ document.original_filename }}" data-preview-kind="{{ document.modal_preview_kind }}">
+                <span class="preview-icon preview-icon-{{ document.preview_kind }}">{{ document.preview_label }}</span>
+                {% if document.preview_kind == "image" %}
+                <img src="{{ document.raw_preview_url }}" alt="{{ document.original_filename }}" loading="lazy">
+                {% endif %}
+              </button>
+              <div class="doc-triage-body">
+                <div class="doc-triage-filename" title="{{ document.original_filename }}">{{ document.original_filename }}</div>
+                <div class="doc-triage-meta">
+                  {% if document.source_from_display %}<span>From: {{ document.source_from_display }}</span>{% endif %}
+                  {% if document.detected_vendor %}<span>Vendor: <strong>{{ document.detected_vendor }}</strong></span>{% endif %}
+                  {% if document.detected_date %}<span>Date: {{ document.detected_date }}</span>{% endif %}
+                </div>
+                {% if document.supposed_filename %}
+                <div class="doc-triage-suggested">→ <code>{{ document.supposed_filename }}</code></div>
+                {% endif %}
+                <div class="doc-triage-actions">
+                  <form class="rename-form" method="post" action="/documents/{{ document.id }}/rename">
+                    <input name="date" type="date" value="{{ document.detected_date or '' }}" required>
+                    <input name="vendor" value="{{ document.detected_vendor or '' }}" placeholder="vendor" required>
+                    <button type="submit" class="btn btn-primary btn-sm">Rename</button>
+                  </form>
+                  <form method="post" action="/documents/{{ document.id }}/status" class="inline-form">
+                    <button name="status" value="review_ignored" class="btn btn-ghost btn-xs">Skip</button>
+                  </form>
+                </div>
+              </div>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+        {% endif %}
+
+        <!-- RENAMED DOCUMENTS KANBAN -->
+        {% if renamed_docs or included_docs or skipped_docs %}
+        <section class="doc-kanban-section">
+          <h2 class="section-title">📂 Sort renamed documents</h2>
+          <div class="kanban-board">
+            <!-- TO SORT COLUMN -->
+            <div class="kanban-column kanban-col-pending">
+              <div class="kanban-header">
+                <span class="kanban-header-icon">📥</span>
+                <span class="kanban-header-title">To sort</span>
+                <span class="count-label">{{ renamed_docs|length }}</span>
+              </div>
+              <div class="kanban-items">
+                {% for document in renamed_docs %}
+                <article class="kanban-card">
+                  <div class="kanban-card-top">
+                    <button class="preview preview-sm" type="button"
+                      data-preview-url="{{ document.final_preview_url or document.raw_preview_url }}" data-open-url="{{ document.raw_open_url }}"
+                      data-preview-name="{{ document.final_filename or document.original_filename }}" data-preview-kind="{{ document.modal_preview_kind }}">
+                      <span class="preview-icon preview-icon-{{ document.preview_kind }}">{{ document.preview_label }}</span>
+                    </button>
+                    <div class="kanban-card-info">
+                      <div class="kanban-card-filename" title="{{ document.final_filename }}">{{ document.final_filename }}</div>
+                      <div class="kanban-card-meta">{{ document.detected_vendor or "" }} · {{ document.detected_date or "" }}</div>
+                      {% if document.source_from_display %}
+                      <div class="kanban-card-meta">From: {{ document.source_from_display }}</div>
+                      {% endif %}
+                    </div>
+                  </div>
+                  <div class="kanban-card-actions">
+                    <form method="post" action="/documents/{{ document.id }}/status" class="inline-form">
+                      <button name="status" value="doc_included" class="btn btn-primary btn-xs">✓ Include</button>
+                      <button name="status" value="review_ignored" class="btn btn-ghost btn-xs">✗ Skip</button>
+                    </form>
+                    {% if document.source_id %}
+                    <form method="post" action="/documents/bulk-rule" class="inline-form">
+                      <input type="hidden" name="document_id" value="{{ document.id }}">
+                      <input type="hidden" name="rule_type" value="always_process">
+                      <button name="match_type" value="domain" class="btn btn-outline btn-xs" title="Whitelist all from this domain">+ Domain</button>
+                    </form>
+                    <form method="post" action="/documents/bulk-rule" class="inline-form">
+                      <input type="hidden" name="document_id" value="{{ document.id }}">
+                      <input type="hidden" name="rule_type" value="ignore">
+                      <button name="match_type" value="domain" class="btn btn-danger-outline btn-xs" title="Blacklist all from this domain">⊘ Domain</button>
+                    </form>
+                    {% endif %}
+                  </div>
+                </article>
+                {% endfor %}
+                {% if not renamed_docs %}
+                <div class="kanban-empty">Nothing to sort</div>
+                {% endif %}
+              </div>
+            </div>
+
+            <!-- INCLUDED COLUMN -->
+            <div class="kanban-column kanban-col-included">
+              <div class="kanban-header">
+                <span class="kanban-header-icon">✓</span>
+                <span class="kanban-header-title">Included</span>
+                <span class="count-label">{{ included_docs|length }}</span>
+              </div>
+              <div class="kanban-items">
+                {% for document in included_docs %}
+                <article class="kanban-card kanban-card-included">
+                  <div class="kanban-card-top">
+                    <button class="preview preview-sm" type="button"
+                      data-preview-url="{{ document.final_preview_url or document.raw_preview_url }}" data-open-url="{{ document.raw_open_url }}"
+                      data-preview-name="{{ document.final_filename or document.original_filename }}" data-preview-kind="{{ document.modal_preview_kind }}">
+                      <span class="preview-icon preview-icon-{{ document.preview_kind }}">{{ document.preview_label }}</span>
+                    </button>
+                    <div class="kanban-card-info">
+                      <div class="kanban-card-filename" title="{{ document.final_filename or document.original_filename }}">{{ document.final_filename or document.original_filename }}</div>
+                      <div class="kanban-card-meta">{{ document.detected_vendor or "" }} · {{ document.detected_date or "" }}</div>
+                    </div>
+                  </div>
+                  <div class="kanban-card-actions">
+                    <form method="post" action="/documents/{{ document.id }}/status" class="inline-form">
+                      <button name="status" value="renamed" class="btn btn-ghost btn-xs">← Unsort</button>
+                      <button name="status" value="review_ignored" class="btn btn-ghost btn-xs">→ Skip</button>
+                    </form>
+                  </div>
+                </article>
+                {% endfor %}
+                {% if not included_docs %}
+                <div class="kanban-empty">No included documents yet</div>
+                {% endif %}
+              </div>
+            </div>
+
+            <!-- SKIPPED COLUMN -->
+            <div class="kanban-column kanban-col-skipped">
+              <div class="kanban-header">
+                <span class="kanban-header-icon">✗</span>
+                <span class="kanban-header-title">Skipped</span>
+                <span class="count-label">{{ skipped_docs|length }}</span>
+              </div>
+              <div class="kanban-items">
+                {% for document in skipped_docs %}
+                <article class="kanban-card kanban-card-skipped">
+                  <div class="kanban-card-top">
+                    <button class="preview preview-sm" type="button"
+                      data-preview-url="{{ document.raw_preview_url }}" data-open-url="{{ document.raw_open_url }}"
+                      data-preview-name="{{ document.final_filename or document.original_filename }}" data-preview-kind="{{ document.modal_preview_kind }}">
+                      <span class="preview-icon preview-icon-{{ document.preview_kind }}">{{ document.preview_label }}</span>
+                    </button>
+                    <div class="kanban-card-info">
+                      <div class="kanban-card-filename" title="{{ document.final_filename or document.original_filename }}">{{ document.final_filename or document.original_filename }}</div>
+                      <div class="kanban-card-meta">{{ document.source_from_display or "" }}</div>
+                    </div>
+                  </div>
+                  <div class="kanban-card-actions">
+                    <form method="post" action="/documents/{{ document.id }}/status" class="inline-form">
+                      <button name="status" value="renamed" class="btn btn-ghost btn-xs">← Unsort</button>
+                      <button name="status" value="doc_included" class="btn btn-outline btn-xs">← Include</button>
+                    </form>
+                  </div>
+                </article>
+                {% endfor %}
+                {% if not skipped_docs %}
+                <div class="kanban-empty">No skipped documents</div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </section>
+        {% endif %}
+
+        {% if not triage_docs and not renamed_docs and not included_docs and not skipped_docs %}
+        <div class="empty-state"><p>No documents yet. Run a scan to extract attachments.</p></div>
+        {% endif %}
+      </div>
+
+      <!-- PROCESSED TAB -->
+      <div class="tab-panel" id="panel-processed" role="tabpanel">
+        {% set auto_mails = mails|selectattr("status", "equalto", "mail_auto_selected")|list %}
+        {% set ignored_mails = mails|selectattr("status", "equalto", "mail_ignored")|list %}
+
+        {% if auto_mails %}
+        <h2 class="section-title">Auto-selected <span class="count-label">{{ auto_mails|length }}</span></h2>
+        <table class="data-table">
+          <thead>
+            <tr><th>From</th><th>Subject</th><th>Vendor</th><th>Reason</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            {% for mail in auto_mails %}
+            <tr>
+              <td>{{ mail.sender }}</td>
+              <td>{{ mail.subject }}</td>
+              <td>{{ mail.detected_vendor or "" }}</td>
+              <td><span class="badge badge-subtle">{{ mail.extraction_reason }}</span></td>
+              <td class="actions-cell">
+                <form method="post" action="/mails/{{ mail.id }}/status" class="inline-form">
+                  <button name="status" value="mail_triage_needed" class="btn btn-ghost btn-xs">↩ Triage</button>
+                </form>
+                <form method="post" action="/mails/{{ mail.id }}/rule" class="inline-form">
+                  <input type="hidden" name="rule_type" value="ignore">
+                  <button name="match_type" value="sender" class="btn btn-danger-outline btn-xs">⊘ Blacklist sender</button>
+                  <button name="match_type" value="domain" class="btn btn-danger-outline btn-xs">⊘ Blacklist domain</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+
+        {% if ignored_mails %}
+        <h2 class="section-title">Ignored <span class="count-label">{{ ignored_mails|length }}</span></h2>
+        <table class="data-table">
+          <thead>
+            <tr><th>From</th><th>Subject</th><th>Reason</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            {% for mail in ignored_mails %}
+            <tr>
+              <td>{{ mail.sender }}</td>
+              <td>{{ mail.subject }}</td>
+              <td><span class="badge badge-subtle">{{ mail.extraction_reason }}</span></td>
+              <td class="actions-cell">
+                <form method="post" action="/mails/{{ mail.id }}/status" class="inline-form">
+                  <button name="status" value="mail_triage_needed" class="btn btn-ghost btn-xs">↩ Triage</button>
+                </form>
+                <form method="post" action="/mails/{{ mail.id }}/rule" class="inline-form">
+                  <input type="hidden" name="rule_type" value="always_process">
+                  <button name="match_type" value="sender" class="btn btn-outline btn-xs">+ Whitelist sender</button>
+                  <button name="match_type" value="domain" class="btn btn-outline btn-xs">+ Whitelist domain</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+
+        {% if runs %}
+        <h2 class="section-title">Scan history</h2>
+        <table class="data-table">
+          <thead><tr><th>Started</th><th>Status</th><th>Summary</th></tr></thead>
+          <tbody>
+            {% for run in runs %}
+            <tr>
+              <td>{{ run.started_at }}</td>
+              <td><span class="badge badge-{{ 'success' if run.status == 'finished' else 'warning' }}">{{ run.status }}</span></td>
+              <td><code class="run-summary">{{ run.summary }}</code></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+
+        {% if not auto_mails and not ignored_mails and not runs %}
+        <div class="empty-state"><p>No processed mails yet.</p></div>
+        {% endif %}
+      </div>
+
+      <!-- PROVIDERS TAB -->
+      <div class="tab-panel" id="panel-providers" role="tabpanel">
+        <div class="panel-header">
+          <h2 class="section-title">Provider links</h2>
+        </div>
+        <form method="post" action="/providers" class="inline-add-form">
+          <input name="provider" placeholder="Provider name" required>
+          <input name="url" placeholder="Invoice portal URL" type="url" required>
+          <input name="notes" placeholder="Notes (optional)">
+          <button type="submit" class="btn btn-primary btn-sm">+ Add</button>
+        </form>
+        {% if provider_tasks %}
+        <table class="data-table">
+          <thead><tr><th>Provider</th><th>URL</th><th>Status</th><th>Notes</th></tr></thead>
+          <tbody>
+            {% for task in provider_tasks %}
+            <tr>
+              <td><strong>{{ task.provider }}</strong></td>
+              <td><a href="{{ task.url }}" target="_blank" rel="noreferrer">{{ task.url[:60] }}{% if task.url|length > 60 %}…{% endif %}</a></td>
+              <td><span class="badge badge-subtle">{{ task.status.replace("_", " ") }}</span></td>
+              <td>{{ task.notes }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state"><p>No provider links configured.</p></div>
+        {% endif %}
+      </div>
+
+      <!-- SETTINGS TAB -->
+      <div class="tab-panel" id="panel-settings" role="tabpanel">
+        <h2 class="section-title">Rules</h2>
+        <form method="post" action="/rules" class="inline-add-form">
+          <select name="rule_type">
+            <option value="always_process">Always process</option>
+            <option value="ignore">Ignore</option>
+          </select>
+          <select name="match_type">
+            <option value="sender">Sender</option>
+            <option value="domain">Domain</option>
+            <option value="vendor">Vendor</option>
+          </select>
+          <input name="match_value" placeholder="value to match" required>
+          <input name="vendor" placeholder="Vendor alias (optional)">
+          <button type="submit" class="btn btn-primary btn-sm">+ Add rule</button>
+        </form>
+        {% if rules %}
+        <table class="data-table">
+          <thead><tr><th>Type</th><th>Match</th><th>Value</th><th>Vendor</th><th></th></tr></thead>
+          <tbody>
+            {% for rule in rules %}
+            <tr>
+              <td><span class="badge badge-{{ 'success' if rule.rule_type == 'always_process' else 'danger' }}">{{ "Whitelist" if rule.rule_type == "always_process" else "Blacklist" }}</span></td>
+              <td>{{ rule.match_type }}</td>
+              <td><code>{{ rule.match_value }}</code></td>
+              <td>{{ rule.vendor or "—" }}</td>
+              <td>
+                <form method="post" action="/rules/{{ rule.id }}/delete" class="inline-form">
+                  <button type="submit" class="btn btn-ghost btn-xs">Remove</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state"><p>No rules configured yet.</p></div>
+        {% endif %}
+
+        <h2 class="section-title" style="margin-top: 24px;">Configuration</h2>
+        <dl class="config-list">
+          <dt>Database</dt><dd><code>{{ settings.db_path }}</code></dd>
+          <dt>Raw directory</dt><dd><code>{{ settings.raw_dir }}</code></dd>
+          <dt>Renamed directory</dt><dd><code>{{ settings.renamed_dir }}</code></dd>
+          <dt>Accounting domain</dt><dd><code>{{ settings.accounting_domain }}</code></dd>
+          <dt>Min confidence</dt><dd>{{ "%.0f%%"|format(settings.min_rename_confidence * 100) }}</dd>
+          <dt>LLM extractor</dt><dd><code>{{ settings.llm_extractor_command or "not configured" }}</code></dd>
+          <dt>OpenAI</dt><dd>{% if settings.openai_api_key %}<span class="badge badge-success">active</span> model: <code>{{ settings.openai_model }}</code>{% else %}<span class="badge badge-subtle">not configured</span>{% endif %}</dd>
+          <dt>Apple Intelligence</dt><dd>{% if settings.use_apple_llm %}<span class="badge badge-success">enabled</span>{% else %}<span class="badge badge-subtle">disabled</span>{% endif %}</dd>
+        </dl>
+
+        <h2 class="section-title" style="margin-top: 24px;">Danger zone</h2>
+        <div class="danger-zone">
+          <div class="danger-zone-info">
+            <strong>Reset &amp; reprocess</strong>
+            <p>Delete all mails, documents, and renamed files. Rules (whitelist/blacklist) are kept. You can then re-scan to reprocess everything from scratch.</p>
+          </div>
+          <form method="post" action="/reset" onsubmit="return confirm('This will delete all processed data and renamed files. Rules will be kept. Continue?')">
+            <button type="submit" class="btn btn-danger btn-sm">Reset all data</button>
+          </form>
+        </div>
+      </div>
+    </main>
+
+    <div class="preview-modal" id="preview-modal" hidden>
+      <div class="preview-modal-backdrop" id="preview-modal-backdrop"></div>
+      <div class="preview-modal-panel" role="dialog" aria-modal="true" aria-labelledby="preview-modal-title">
+        <div class="preview-modal-header">
+          <h2 id="preview-modal-title">Attachment</h2>
+          <div class="preview-modal-actions">
+            <a class="btn btn-outline btn-sm" id="preview-open-link" href="#" target="_blank" rel="noreferrer">Open ↗</a>
+            <button class="btn btn-ghost btn-sm" id="preview-close-button" type="button">Close</button>
+          </div>
+        </div>
+        <div class="preview-modal-body" id="preview-modal-body"></div>
+      </div>
+    </div>
+  </body>
+</html>

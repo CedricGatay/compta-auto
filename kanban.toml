@@ -1,0 +1,6 @@
+schema_version = 1
+cards = []
+
+[board]
+columns = ['todo', 'ongoing', 'done']
+priorities = ['low', 'medium', 'high']

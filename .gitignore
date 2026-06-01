@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+.venv/
+
+# Data (runtime state, not source)
+data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# macOS
+.DS_Store
+
+# Test/CI
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Swift build artifacts
+tools/apple-extractor/.build/

@@ -1,0 +1,54 @@
+<article class="mail-card">
+  <div class="mail-card-header">
+    <div class="mail-card-meta">
+      <span class="mail-sender">{{ mail.sender }}</span>
+      <span class="mail-arrow">→</span>
+      <span class="mail-recipients">{{ mail.recipients_display }}</span>
+    </div>
+    {% if mail.detected_vendor %}
+    <span class="badge badge-vendor">{{ mail.detected_vendor }}</span>
+    {% endif %}
+  </div>
+  <div class="mail-card-subject">{{ mail.subject }}</div>
+  <div class="mail-card-body">
+    <div class="mail-previews">
+      {% for item in mail.preview_items %}
+      {% if item.type == "link" %}
+      <a class="mail-preview mail-preview-link" href="{{ item.url }}" target="_blank" rel="noreferrer" title="{{ item.url }}">
+        <span class="preview-icon preview-icon-link">{{ item.label }}</span>
+        <span class="mail-preview-name">{{ item.display_name }}</span>
+      </a>
+      {% elif item.preview_url %}
+      <button class="mail-preview" type="button" title="{{ item.filename }}"
+        data-preview-url="{{ item.preview_url }}" data-open-url="{{ item.open_url }}"
+        data-preview-name="{{ item.filename }}" data-preview-kind="{{ item.modal_preview_kind }}">
+        <span class="preview-icon preview-icon-{{ item.preview_kind }}">{{ item.preview_label }}</span>
+        <span class="mail-preview-name">{{ item.filename }}</span>
+      </button>
+      {% else %}
+      <span class="mail-preview" title="{{ item.filename }}">
+        <span class="preview-icon preview-icon-{{ item.preview_kind }}">{{ item.preview_label }}</span>
+        <span class="mail-preview-name">{{ item.filename }}</span>
+      </span>
+      {% endif %}
+      {% endfor %}
+    </div>
+    <div class="mail-card-actions">
+      <form method="post" action="/mails/{{ mail.id }}/status">
+        <button name="status" value="mail_auto_selected" class="btn btn-primary btn-sm">✓ Process</button>
+        <button name="status" value="mail_ignored" class="btn btn-ghost btn-sm">✗ Ignore</button>
+      </form>
+      <div class="action-divider"></div>
+      <form method="post" action="/mails/{{ mail.id }}/rule">
+        <input type="hidden" name="rule_type" value="always_process">
+        <button name="match_type" value="sender" class="btn btn-outline btn-sm">+ Whitelist sender</button>
+        <button name="match_type" value="domain" class="btn btn-outline btn-sm">+ Whitelist domain</button>
+      </form>
+      <form method="post" action="/mails/{{ mail.id }}/rule">
+        <input type="hidden" name="rule_type" value="ignore">
+        <button name="match_type" value="sender" class="btn btn-danger-outline btn-sm">⊘ Blacklist sender</button>
+        <button name="match_type" value="domain" class="btn btn-danger-outline btn-sm">⊘ Blacklist domain</button>
+      </form>
+    </div>
+  </div>
+</article>
