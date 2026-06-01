@@ -905,3 +905,74 @@ button.preview { color: inherit; cursor: pointer; padding: 0; }
   .mail-card-body { flex-direction: column; }
   .inline-add-form { flex-direction: column; }
 }
+
+/* === FETCH TAB === */
+.fetch-section {
+  max-width: 720px;
+  margin-bottom: 32px;
+}
+.fetch-section h3 {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+}
+.fetch-description {
+  color: var(--text-muted, #666);
+  font-size: 0.9rem;
+  margin: 0 0 12px;
+}
+.fetch-description code {
+  background: var(--bg-subtle, #f0f0f0);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.85rem;
+}
+.fetch-form {
+  margin-bottom: 12px;
+}
+.fetch-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.fetch-input-row input[type="text"] {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border, #ddd);
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 0.85rem;
+}
+.fetch-result {
+  padding: 12px 16px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.fetch-result-success {
+  background: var(--bg-success, #e6f9e6);
+  border: 1px solid var(--border-success, #4caf50);
+  color: var(--text-success, #2e7d32);
+}
+.fetch-result-error {
+  background: var(--bg-danger, #fdecea);
+  border: 1px solid var(--border-danger, #f44336);
+  color: var(--text-danger, #c62828);
+}
+.fetch-result-progress {
+  background: var(--bg-subtle, #f5f5f5);
+  border: 1px solid var(--border, #ddd);
+  color: var(--text, #333);
+}
+.fetch-progress-bar {
+  height: 6px;
+  background: var(--bg-subtle, #e0e0e0);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.fetch-progress-fill {
+  height: 100%;
+  background: var(--color-primary, #1db954);
+  border-radius: 3px;
+  transition: width 0.2s ease;
+}

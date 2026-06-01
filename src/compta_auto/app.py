@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import mimetypes
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -130,6 +131,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             shutil.rmtree(app_settings.raw_dir)
             app_settings.raw_dir.mkdir(parents=True, exist_ok=True)
         return RedirectResponse("/", status_code=303)
+
+    @app.post("/api/fetch-spotify")
+    def api_fetch_spotify(
+        sp_dc: str = Form(...),
+        repo: Repository = Depends(get_repo),
+    ) -> StreamingResponse:
+        """Fetch Spotify invoices with SSE progress updates."""
+        from .spotify import fetch_spotify_invoices_stream
+
+        def event_stream():
+            try:
+                result = {"total": 0, "downloaded": 0, "skipped": 0, "errors": []}
+                for event in fetch_spotify_invoices_stream(sp_dc, app_settings.raw_dir):
+                    if event["type"] == "progress":
+                        yield f"data: {json.dumps(event)}\n\n"
+                    elif event["type"] == "done":
+                        result = event["result"]
+                # Process through pipeline
+                yield f"data: {json.dumps({'type': 'status', 'message': 'Processing documents…'})}\n\n"
+                pipeline = AccountingPipeline(app_settings, repo)
+                scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730)
+                result["processed"] = scan_summary.renamed + scan_summary.rename_review_needed
+                yield f"data: {json.dumps({'type': 'complete', 'result': result})}\n\n"
+            except SystemExit:
+                yield f"data: {json.dumps({'type': 'error', 'error': 'Authentication failed. Your sp_dc cookie is invalid or expired.'})}\n\n"
+            except Exception as exc:
+                yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
 
     @app.post("/rules")
     def add_rule(

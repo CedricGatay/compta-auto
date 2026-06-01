@@ -66,8 +66,11 @@ class MetadataExtractor:
     def _read_text(self, path: Path) -> str:
         if path.suffix.lower() == ".pdf":
             try:
+                import logging
+
                 import pdfplumber
 
+                logging.getLogger("pdfminer").setLevel(logging.ERROR)
                 with pdfplumber.open(path) as pdf:
                     return "\n".join(page.extract_text() or "" for page in pdf.pages)
             except Exception:

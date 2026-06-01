@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Compta Auto</title>
-    <link rel="stylesheet" href="/static/styles.css?v=2">
-    <script src="/static/app.js?v=8" defer></script>
+    <link rel="stylesheet" href="/static/styles.css?v=4">
+    <script src="/static/app.js?v=11" defer></script>
   </head>
   <body>
     <header>
@@ -61,6 +61,7 @@
       </button>
       <button class="tab" role="tab" aria-selected="false" data-tab="processed">Processed</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="providers">Providers</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="fetch">Fetch</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="settings">Settings</button>
     </nav>
 
@@ -426,6 +427,28 @@
         {% else %}
         <div class="empty-state"><p>No provider links configured.</p></div>
         {% endif %}
+      </div>
+
+      <!-- FETCH TAB -->
+      <div class="tab-panel" id="panel-fetch" role="tabpanel">
+        <h2 class="section-title">Fetch invoices from providers</h2>
+
+        <section class="fetch-section">
+          <h3>🎵 Spotify</h3>
+          <p class="fetch-description">
+            Download all available Spotify receipts using your session cookie.
+            To get your <code>sp_dc</code> cookie: log in to
+            <a href="https://open.spotify.com" target="_blank" rel="noreferrer">open.spotify.com</a>,
+            open DevTools (F12) → Application → Cookies → copy the <code>sp_dc</code> value.
+          </p>
+          <form id="fetch-spotify-form" class="fetch-form">
+            <div class="fetch-input-row">
+              <input type="text" name="sp_dc" id="spotify-sp-dc" placeholder="Paste your sp_dc cookie value here…" required autocomplete="off">
+              <button type="submit" class="btn btn-primary" id="fetch-spotify-btn">🔄 Fetch invoices</button>
+            </div>
+          </form>
+          <div id="fetch-spotify-result" class="fetch-result" hidden></div>
+        </section>
       </div>
 
       <!-- SETTINGS TAB -->

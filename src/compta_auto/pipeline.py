@@ -103,13 +103,14 @@ class AccountingPipeline:
         content_hash = sha256_file(file_path)
 
         mime = mimetypes.guess_type(file_path.name)[0]
-        doc_id, created = self.repo.upsert_document(
+        doc_id, created = self.repo.add_document(
             source_type="local_folder",
             source_id=str(file_path.parent),
             original_filename=file_path.name,
             raw_path=str(file_path),
             content_hash=content_hash,
             mime_type=mime,
+            status="attachment_extracted",
         )
         if not created:
             summary.duplicates_skipped += 1

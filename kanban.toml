@@ -1,6 +1,59 @@
 schema_version = 1
-cards = []
 
 [board]
 columns = ['todo', 'ongoing', 'done']
 priorities = ['low', 'medium', 'high']
+
+[[cards]]
+id = '80zaa0'
+title = 'Upload to inqom'
+column = 'todo'
+description = ''
+created_at = 2026-06-01T13:22:18Z
+updated_at = 2026-06-01T13:22:18Z
+tags = []
+
+[[cards]]
+id = 'cjnci8'
+title = 'Move renamed files to Google Drive folder'
+column = 'todo'
+description = ''
+created_at = 2026-06-01T13:22:34Z
+updated_at = 2026-06-01T13:22:34Z
+tags = []
+
+[[cards]]
+id = '8bndju'
+title = 'Gather OpenAI invoices'
+column = 'todo'
+description = ''
+created_at = 2026-06-01T13:23:16Z
+updated_at = 2026-06-01T13:23:16Z
+tags = []
+
+[[cards]]
+id = '9nfcdz'
+title = 'Gather Orange invoices'
+column = 'todo'
+description = ''
+created_at = 2026-06-01T13:23:16Z
+updated_at = 2026-06-01T13:23:16Z
+tags = []
+
+[[cards]]
+id = 'a9bi0r'
+title = 'Gather Free Mobile invoices'
+column = 'todo'
+description = ''
+created_at = 2026-06-01T13:23:16Z
+updated_at = 2026-06-01T13:23:16Z
+tags = []
+
+[[cards]]
+id = 'yj3bno'
+title = 'Gather Spotify invoices'
+column = 'done'
+description = ''
+created_at = 2026-06-01T13:23:16Z
+updated_at = 2026-06-01T14:46:03Z
+tags = []
