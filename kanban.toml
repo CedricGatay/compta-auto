@@ -23,15 +23,6 @@ updated_at = 2026-06-01T13:22:34Z
 tags = []
 
 [[cards]]
-id = '8bndju'
-title = 'Gather OpenAI invoices'
-column = 'todo'
-description = ''
-created_at = 2026-06-01T13:23:16Z
-updated_at = 2026-06-01T13:23:16Z
-tags = []
-
-[[cards]]
 id = '9nfcdz'
 title = 'Gather Orange invoices'
 column = 'todo'
@@ -56,4 +47,13 @@ column = 'done'
 description = ''
 created_at = 2026-06-01T13:23:16Z
 updated_at = 2026-06-01T14:46:03Z
+tags = []
+
+[[cards]]
+id = '8bndju'
+title = 'Gather OpenAI invoices'
+column = 'done'
+description = ''
+created_at = 2026-06-01T13:23:16Z
+updated_at = 2026-06-01T15:25:31Z
 tags = []

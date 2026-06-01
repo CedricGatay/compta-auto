@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Compta Auto</title>
-    <link rel="stylesheet" href="/static/styles.css?v=4">
-    <script src="/static/app.js?v=11" defer></script>
+    <link rel="stylesheet" href="/static/styles.css?v=5">
+    <script src="/static/app.js?v=12" defer></script>
   </head>
   <body>
     <header>
@@ -448,6 +448,24 @@
             </div>
           </form>
           <div id="fetch-spotify-result" class="fetch-result" hidden></div>
+        </section>
+
+        <section class="fetch-section">
+          <h3>🤖 ChatGPT</h3>
+          <p class="fetch-description">
+            Download all ChatGPT Plus subscription invoices from Stripe.
+            To get your Bearer token: go to
+            <a href="https://chatgpt.com" target="_blank" rel="noreferrer">chatgpt.com</a>,
+            open DevTools (F12) → Network → find any request to <code>backend-api</code> →
+            copy the <code>Authorization</code> header value (starts with <code>Bearer eyJ…</code>).
+          </p>
+          <form id="fetch-chatgpt-form" class="fetch-form">
+            <div class="fetch-input-row">
+              <input type="text" name="bearer_token" id="chatgpt-bearer" placeholder="Paste your Bearer token here…" required autocomplete="off">
+              <button type="submit" class="btn btn-primary" id="fetch-chatgpt-btn">🔄 Fetch invoices</button>
+            </div>
+          </form>
+          <div id="fetch-chatgpt-result" class="fetch-result" hidden></div>
         </section>
       </div>
 

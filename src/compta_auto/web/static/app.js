@@ -249,3 +249,85 @@ if (spotifyForm) {
     }
   });
 }
+
+// === ChatGPT Invoice Fetch (SSE) ===
+const chatgptForm = document.getElementById("fetch-chatgpt-form");
+if (chatgptForm) {
+  chatgptForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById("fetch-chatgpt-btn");
+    const resultDiv = document.getElementById("fetch-chatgpt-result");
+    const bearerToken = document.getElementById("chatgpt-bearer").value.trim();
+
+    if (!bearerToken) return;
+
+    btn.disabled = true;
+    btn.textContent = "⏳ Fetching…";
+    resultDiv.hidden = false;
+    resultDiv.className = "fetch-result fetch-result-progress";
+    resultDiv.textContent = "Connecting to ChatGPT…";
+
+    try {
+      const formData = new FormData();
+      formData.append("bearer_token", bearerToken);
+
+      const resp = await fetch("/api/fetch-chatgpt", { method: "POST", body: formData });
+
+      if (!resp.ok && !resp.headers.get("content-type")?.includes("text/event-stream")) {
+        const data = await resp.json();
+        resultDiv.className = "fetch-result fetch-result-error";
+        resultDiv.textContent = data.error || "Unknown error occurred.";
+        btn.disabled = false;
+        btn.textContent = "🔄 Fetch invoices";
+        return;
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const event = JSON.parse(line.slice(6));
+
+          if (event.type === "progress") {
+            const pct = event.total > 0 ? Math.round((event.current / event.total) * 100) : 0;
+            resultDiv.innerHTML = `<div class="fetch-progress-bar"><div class="fetch-progress-fill" style="width:${pct}%"></div></div><span>${event.message}</span>`;
+          } else if (event.type === "status") {
+            resultDiv.innerHTML = `<span>⏳ ${event.message}</span>`;
+          } else if (event.type === "complete") {
+            const r = event.result;
+            const parts = [];
+            if (r.downloaded > 0) parts.push(`✅ Downloaded ${r.downloaded} new invoice(s)`);
+            if (r.skipped > 0) parts.push(`⏭ ${r.skipped} already present`);
+            if (r.processed > 0) parts.push(`📄 ${r.processed} processed by pipeline`);
+            if (r.errors && r.errors.length > 0) parts.push(`⚠️ ${r.errors.length} error(s)`);
+            if (parts.length === 0) parts.push("No new invoices to download.");
+            resultDiv.className = "fetch-result fetch-result-success";
+            resultDiv.innerHTML = parts.join("<br>");
+            if (r.downloaded > 0 || r.processed > 0) {
+              setTimeout(() => { window.location.reload(); }, 2000);
+            }
+          } else if (event.type === "error") {
+            resultDiv.className = "fetch-result fetch-result-error";
+            resultDiv.textContent = event.error;
+          }
+        }
+      }
+    } catch (err) {
+      resultDiv.className = "fetch-result fetch-result-error";
+      resultDiv.textContent = `Network error: ${err.message}`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "🔄 Fetch invoices";
+    }
+  });
+}

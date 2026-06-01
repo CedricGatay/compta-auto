@@ -161,6 +161,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
+    @app.post("/api/fetch-chatgpt")
+    def api_fetch_chatgpt(
+        bearer_token: str = Form(...),
+        repo: Repository = Depends(get_repo),
+    ) -> StreamingResponse:
+        """Fetch ChatGPT subscription invoices with SSE progress updates."""
+        from .openai_invoices import fetch_chatgpt_invoices_stream, AuthError
+
+        def event_stream():
+            try:
+                result = {"total": 0, "downloaded": 0, "skipped": 0, "errors": []}
+                for event in fetch_chatgpt_invoices_stream(bearer_token, app_settings.raw_dir):
+                    if event["type"] == "progress":
+                        yield f"data: {json.dumps(event)}\n\n"
+                    elif event["type"] == "done":
+                        result = event["result"]
+                # Process through pipeline
+                yield f"data: {json.dumps({'type': 'status', 'message': 'Processing documents…'})}\n\n"
+                pipeline = AccountingPipeline(app_settings, repo)
+                scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730)
+                result["processed"] = scan_summary.renamed + scan_summary.rename_review_needed
+                yield f"data: {json.dumps({'type': 'complete', 'result': result})}\n\n"
+            except AuthError as exc:
+                yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+            except Exception as exc:
+                yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
     @app.post("/rules")
     def add_rule(
         rule_type: str = Form(...),
