@@ -190,6 +190,60 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
+    @app.post("/api/free-mobile-login")
+    def api_free_mobile_login(
+        username: str = Form(...),
+        password: str = Form(...),
+    ):
+        """Step 1: Login to Free Mobile (triggers OTP via email)."""
+        from .free_invoices import login, AuthError
+
+        try:
+            session_cookies, csrf_token, otp_id = login(username, password)
+            return {"status": "otp_required", "session_cookies": session_cookies, "csrf_token": csrf_token, "otp_id": otp_id}
+        except AuthError as exc:
+            return JSONResponse(status_code=401, content={"error": str(exc)})
+        except Exception as exc:
+            return JSONResponse(status_code=500, content={"error": str(exc)})
+
+    @app.post("/api/free-mobile-otp")
+    def api_free_mobile_otp(
+        session_cookies: str = Form(...),
+        csrf_token: str = Form(...),
+        otp_code: str = Form(...),
+        otp_id: str = Form(""),
+        repo: Repository = Depends(get_repo),
+    ) -> StreamingResponse:
+        """Step 2: Validate OTP and download Free Mobile invoices."""
+        from .free_invoices import fetch_free_invoices_stream, AuthError
+
+        otp_id_int = int(otp_id) if otp_id else None
+
+        def event_stream():
+            try:
+                result = {"total": 0, "downloaded": 0, "skipped": 0, "errors": []}
+                for event in fetch_free_invoices_stream(session_cookies, csrf_token, otp_code, otp_id_int, app_settings.raw_dir):
+                    if event["type"] in ("progress", "status"):
+                        yield f"data: {json.dumps(event)}\n\n"
+                    elif event["type"] == "done":
+                        result = event["result"]
+                    elif event["type"] == "error":
+                        yield f"data: {json.dumps(event)}\n\n"
+                        return
+                # Process through pipeline
+                if result.get("downloaded", 0) > 0:
+                    yield f"data: {json.dumps({'type': 'status', 'message': 'Processing documents…'})}\n\n"
+                    pipeline = AccountingPipeline(app_settings, repo)
+                    scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730)
+                    result["processed"] = scan_summary.renamed + scan_summary.rename_review_needed
+                yield f"data: {json.dumps({'type': 'complete', 'result': result})}\n\n"
+            except AuthError as exc:
+                yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+            except Exception as exc:
+                yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
     @app.post("/rules")
     def add_rule(
         rule_type: str = Form(...),

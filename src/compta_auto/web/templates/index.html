@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Compta Auto</title>
     <link rel="stylesheet" href="/static/styles.css?v=5">
-    <script src="/static/app.js?v=12" defer></script>
+    <script src="/static/app.js?v=13" defer></script>
   </head>
   <body>
     <header>
@@ -466,6 +466,28 @@
             </div>
           </form>
           <div id="fetch-chatgpt-result" class="fetch-result" hidden></div>
+        </section>
+
+        <section class="fetch-section">
+          <h3>📱 Free Mobile</h3>
+          <p class="fetch-description">
+            Download all Free Mobile invoices from your account.
+            Login requires OTP verification — a code will be sent to your email.
+          </p>
+          <form id="fetch-free-login-form" class="fetch-form">
+            <div class="fetch-input-row">
+              <input type="text" name="username" id="free-username" placeholder="8-digit subscriber ID" required autocomplete="off" pattern="\d{8}" style="max-width:160px">
+              <input type="password" name="password" id="free-password" placeholder="Password" required autocomplete="off">
+              <button type="submit" class="btn btn-primary" id="fetch-free-login-btn">🔑 Login</button>
+            </div>
+          </form>
+          <form id="fetch-free-otp-form" class="fetch-form" hidden>
+            <div class="fetch-input-row">
+              <input type="text" name="otp_code" id="free-otp" placeholder="Email code" required autocomplete="off" pattern="\d{4,8}" style="max-width:120px">
+              <button type="submit" class="btn btn-primary" id="fetch-free-otp-btn">✅ Validate &amp; Fetch</button>
+            </div>
+          </form>
+          <div id="fetch-free-result" class="fetch-result" hidden></div>
         </section>
       </div>
 

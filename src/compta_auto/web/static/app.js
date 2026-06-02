@@ -331,3 +331,121 @@ if (chatgptForm) {
     }
   });
 }
+
+// === Free Mobile fetch (2-step: login + OTP) ===
+const freeLoginForm = document.getElementById("fetch-free-login-form");
+if (freeLoginForm) {
+  let freeSession = {};
+
+  freeLoginForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById("fetch-free-login-btn");
+    const resultDiv = document.getElementById("fetch-free-result");
+    const otpForm = document.getElementById("fetch-free-otp-form");
+    const username = document.getElementById("free-username").value.trim();
+    const password = document.getElementById("free-password").value;
+
+    if (!username || !password) return;
+    btn.disabled = true;
+    btn.textContent = "Logging in…";
+    resultDiv.hidden = false;
+    resultDiv.className = "fetch-result fetch-result-progress";
+    resultDiv.textContent = "Logging in… A verification code will be sent to your email.";
+
+    try {
+      const formData = new FormData();
+      formData.append("username", username);
+      formData.append("password", password);
+      const resp = await fetch("/api/free-mobile-login", { method: "POST", body: formData });
+      const data = await resp.json();
+
+      if (!resp.ok) {
+        resultDiv.className = "fetch-result fetch-result-error";
+        resultDiv.textContent = data.error || "Login failed";
+        return;
+      }
+
+      if (data.status === "otp_required") {
+        freeSession = { session_cookies: data.session_cookies, csrf_token: data.csrf_token, otp_id: data.otp_id || "" };
+        resultDiv.className = "fetch-result fetch-result-progress";
+        resultDiv.textContent = "✅ Code sent to your email! Enter it below.";
+        otpForm.hidden = false;
+        document.getElementById("free-otp").focus();
+      }
+    } catch (err) {
+      resultDiv.className = "fetch-result fetch-result-error";
+      resultDiv.textContent = `Network error: ${err.message}`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "🔑 Login";
+    }
+  });
+
+  const otpForm = document.getElementById("fetch-free-otp-form");
+  otpForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById("fetch-free-otp-btn");
+    const resultDiv = document.getElementById("fetch-free-result");
+    const otpCode = document.getElementById("free-otp").value.trim();
+
+    if (!otpCode || !freeSession.session_cookies) return;
+    btn.disabled = true;
+    btn.textContent = "Validating…";
+    resultDiv.className = "fetch-result fetch-result-progress";
+    resultDiv.textContent = "Validating OTP and fetching invoices…";
+
+    try {
+      const formData = new FormData();
+      formData.append("session_cookies", freeSession.session_cookies);
+      formData.append("csrf_token", freeSession.csrf_token);
+      formData.append("otp_code", otpCode);
+      formData.append("otp_id", freeSession.otp_id || "");
+
+      const resp = await fetch("/api/free-mobile-otp", { method: "POST", body: formData });
+      if (!resp.ok) {
+        resultDiv.className = "fetch-result fetch-result-error";
+        resultDiv.textContent = `Server error: ${resp.status}`;
+        return;
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const event = JSON.parse(line.slice(6));
+          if (event.type === "progress") {
+            const pct = Math.round((event.current / event.total) * 100);
+            resultDiv.innerHTML = `<div class="fetch-progress-bar"><div class="fetch-progress-fill" style="width:${pct}%"></div></div><span>${event.message}</span>`;
+          } else if (event.type === "status") {
+            resultDiv.textContent = event.message;
+          } else if (event.type === "complete") {
+            const r = event.result;
+            resultDiv.className = "fetch-result fetch-result-success";
+            let msg = `Done! ${r.downloaded} downloaded, ${r.skipped} skipped.`;
+            if (r.processed) msg += ` ${r.processed} processed.`;
+            if (r.message) msg += ` ${r.message}`;
+            if (r.errors && r.errors.length) msg += ` (${r.errors.length} errors)`;
+            resultDiv.textContent = msg;
+            otpForm.hidden = true;
+          } else if (event.type === "error") {
+            resultDiv.className = "fetch-result fetch-result-error";
+            resultDiv.textContent = event.error;
+          }
+        }
+      }
+    } catch (err) {
+      resultDiv.className = "fetch-result fetch-result-error";
+      resultDiv.textContent = `Network error: ${err.message}`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "✅ Validate & Fetch";
+    }
+  });
+}
