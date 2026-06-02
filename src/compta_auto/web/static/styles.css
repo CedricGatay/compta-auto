@@ -976,3 +976,29 @@ button.preview { color: inherit; cursor: pointer; padding: 0; }
   border-radius: 3px;
   transition: width 0.2s ease;
 }
+
+/* Credential saved badge & edit button */
+.cred-saved-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: var(--bg-success, #e8f5e9);
+  color: var(--text-success, #2e7d32);
+  border-radius: 12px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.cred-edit-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 4px 6px;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+.cred-edit-btn:hover {
+  opacity: 1;
+}

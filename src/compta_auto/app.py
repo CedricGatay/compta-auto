@@ -132,18 +132,68 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app_settings.raw_dir.mkdir(parents=True, exist_ok=True)
         return RedirectResponse("/", status_code=303)
 
+    # --- Credentials management ---
+
+    CREDENTIAL_KEYS = ("spotify_sp_dc", "chatgpt_bearer", "free_username", "free_password")
+
+    @app.get("/api/credentials")
+    def api_get_credentials(repo: Repository = Depends(get_repo)):
+        """Return saved credentials (values masked for display)."""
+        creds = {}
+        for key in CREDENTIAL_KEYS:
+            val = repo.get_app_state(f"cred_{key}")
+            if val:
+                creds[key] = {"saved": True, "hint": val[:4] + "…" + val[-4:] if len(val) > 10 else "••••"}
+            else:
+                creds[key] = {"saved": False, "hint": ""}
+        return creds
+
+    @app.post("/api/credentials")
+    async def api_save_credentials(
+        request: Request,
+        repo: Repository = Depends(get_repo),
+    ):
+        """Save one or more credentials."""
+        body = await request.json()
+        saved = []
+        for key in CREDENTIAL_KEYS:
+            if key in body and body[key]:
+                repo.set_app_state(f"cred_{key}", body[key])
+                saved.append(key)
+        return {"saved": saved}
+
+    @app.delete("/api/credentials/{key}")
+    def api_delete_credential(key: str, repo: Repository = Depends(get_repo)):
+        """Clear a saved credential."""
+        if key not in CREDENTIAL_KEYS:
+            raise HTTPException(status_code=400, detail="Invalid credential key")
+        repo.set_app_state(f"cred_{key}", "")
+        return {"deleted": key}
+
+    def _get_cred(repo: Repository, key: str, form_value: str | None = None) -> str | None:
+        """Return form value if provided, otherwise fall back to saved credential."""
+        if form_value and form_value.strip():
+            return form_value.strip()
+        return repo.get_app_state(f"cred_{key}") or None
+
     @app.post("/api/fetch-spotify")
     def api_fetch_spotify(
-        sp_dc: str = Form(...),
+        sp_dc: str = Form(""),
         repo: Repository = Depends(get_repo),
     ) -> StreamingResponse:
         """Fetch Spotify invoices with SSE progress updates."""
         from .spotify import fetch_spotify_invoices_stream
 
+        effective_sp_dc = _get_cred(repo, "spotify_sp_dc", sp_dc)
+        if not effective_sp_dc:
+            raise HTTPException(status_code=400, detail="No sp_dc cookie provided or saved.")
+        # Save for next time
+        repo.set_app_state("cred_spotify_sp_dc", effective_sp_dc)
+
         def event_stream():
             try:
                 result = {"total": 0, "downloaded": 0, "skipped": 0, "errors": []}
-                for event in fetch_spotify_invoices_stream(sp_dc, app_settings.raw_dir):
+                for event in fetch_spotify_invoices_stream(effective_sp_dc, app_settings.raw_dir):
                     if event["type"] == "progress":
                         yield f"data: {json.dumps(event)}\n\n"
                     elif event["type"] == "done":
@@ -163,16 +213,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/fetch-chatgpt")
     def api_fetch_chatgpt(
-        bearer_token: str = Form(...),
+        bearer_token: str = Form(""),
         repo: Repository = Depends(get_repo),
     ) -> StreamingResponse:
         """Fetch ChatGPT subscription invoices with SSE progress updates."""
         from .openai_invoices import fetch_chatgpt_invoices_stream, AuthError
 
+        effective_token = _get_cred(repo, "chatgpt_bearer", bearer_token)
+        if not effective_token:
+            raise HTTPException(status_code=400, detail="No Bearer token provided or saved.")
+        repo.set_app_state("cred_chatgpt_bearer", effective_token)
+
         def event_stream():
             try:
                 result = {"total": 0, "downloaded": 0, "skipped": 0, "errors": []}
-                for event in fetch_chatgpt_invoices_stream(bearer_token, app_settings.raw_dir):
+                for event in fetch_chatgpt_invoices_stream(effective_token, app_settings.raw_dir):
                     if event["type"] == "progress":
                         yield f"data: {json.dumps(event)}\n\n"
                     elif event["type"] == "done":
@@ -192,14 +247,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/free-mobile-login")
     def api_free_mobile_login(
-        username: str = Form(...),
-        password: str = Form(...),
+        username: str = Form(""),
+        password: str = Form(""),
+        repo: Repository = Depends(get_repo),
     ):
         """Step 1: Login to Free Mobile (triggers OTP via email)."""
         from .free_invoices import login, AuthError
 
+        effective_user = _get_cred(repo, "free_username", username)
+        effective_pass = _get_cred(repo, "free_password", password)
+        if not effective_user or not effective_pass:
+            return JSONResponse(status_code=400, content={"error": "No credentials provided or saved."})
+
         try:
-            session_cookies, csrf_token, otp_id = login(username, password)
+            session_cookies, csrf_token, otp_id = login(effective_user, effective_pass)
+            # Save on success
+            repo.set_app_state("cred_free_username", effective_user)
+            repo.set_app_state("cred_free_password", effective_pass)
             return {"status": "otp_required", "session_cookies": session_cookies, "csrf_token": csrf_token, "otp_id": otp_id}
         except AuthError as exc:
             return JSONResponse(status_code=401, content={"error": str(exc)})

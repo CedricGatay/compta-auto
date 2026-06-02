@@ -60,7 +60,62 @@ document.querySelectorAll(".tab-panel").forEach((panel) => {
   }
 });
 
-// === Preview modal ===
+// === Credentials: hide fields when saved, show edit button ===
+function revealCredFields(inputIds, badgeId, editBtnId) {
+  for (const id of inputIds) {
+    const el = document.getElementById(id);
+    if (el) el.hidden = false;
+  }
+  const badge = document.getElementById(badgeId);
+  if (badge) badge.hidden = true;
+  const editBtn = document.getElementById(editBtnId);
+  if (editBtn) editBtn.hidden = true;
+}
+
+(async function loadCredentials() {
+  try {
+    const resp = await fetch("/api/credentials");
+    if (!resp.ok) return;
+    const creds = await resp.json();
+
+    const mapping = [
+      { key: "spotify_sp_dc", inputIds: ["spotify-sp-dc"], badge: "spotify-saved-badge", editBtn: "spotify-edit-btn" },
+      { key: "chatgpt_bearer", inputIds: ["chatgpt-bearer"], badge: "chatgpt-saved-badge", editBtn: "chatgpt-edit-btn" },
+      { key: "free_username", inputIds: ["free-username", "free-password"], badge: "free-saved-badge", editBtn: "free-edit-btn", also: "free_password" },
+    ];
+
+    for (const m of mapping) {
+      const hasCred = creds[m.key]?.saved && (!m.also || creds[m.also]?.saved);
+      if (!hasCred) continue;
+
+      // Hide input fields
+      for (const id of m.inputIds) {
+        const el = document.getElementById(id);
+        if (el) el.hidden = true;
+      }
+      // Show badge and edit button
+      const badge = document.getElementById(m.badge);
+      if (badge) {
+        badge.hidden = false;
+        badge.title = creds[m.key].hint;
+      }
+      const editBtn = document.getElementById(m.editBtn);
+      if (editBtn) {
+        editBtn.hidden = false;
+        editBtn.addEventListener("click", () => {
+          for (const id of m.inputIds) {
+            const el = document.getElementById(id);
+            if (el) el.hidden = false;
+          }
+          badge.hidden = true;
+          editBtn.hidden = true;
+        });
+      }
+    }
+  } catch (e) {
+    // Silently fail — fields remain visible
+  }
+})();
 const modal = document.getElementById("preview-modal");
 const modalTitle = document.getElementById("preview-modal-title");
 const modalBody = document.getElementById("preview-modal-body");
@@ -174,9 +229,11 @@ if (spotifyForm) {
     e.preventDefault();
     const btn = document.getElementById("fetch-spotify-btn");
     const resultDiv = document.getElementById("fetch-spotify-result");
-    const spDc = document.getElementById("spotify-sp-dc").value.trim();
+    const spDcInput = document.getElementById("spotify-sp-dc");
+    const spDc = spDcInput.hidden ? "" : spDcInput.value.trim();
 
-    if (!spDc) return;
+    // If field is visible and empty, it means no saved cred either
+    if (!spDcInput.hidden && !spDc) return;
 
     btn.disabled = true;
     btn.textContent = "⏳ Fetching…";
@@ -194,13 +251,11 @@ if (spotifyForm) {
         const data = await resp.json();
         resultDiv.className = "fetch-result fetch-result-error";
         resultDiv.textContent = data.error || "Unknown error occurred.";
+        revealCredFields(["spotify-sp-dc"], "spotify-saved-badge", "spotify-edit-btn");
         btn.disabled = false;
         btn.textContent = "🔄 Fetch invoices";
         return;
       }
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
       let buffer = "";
 
       while (true) {
@@ -237,6 +292,7 @@ if (spotifyForm) {
           } else if (event.type === "error") {
             resultDiv.className = "fetch-result fetch-result-error";
             resultDiv.textContent = event.error;
+            revealCredFields(["spotify-sp-dc"], "spotify-saved-badge", "spotify-edit-btn");
           }
         }
       }
@@ -257,9 +313,10 @@ if (chatgptForm) {
     e.preventDefault();
     const btn = document.getElementById("fetch-chatgpt-btn");
     const resultDiv = document.getElementById("fetch-chatgpt-result");
-    const bearerToken = document.getElementById("chatgpt-bearer").value.trim();
+    const bearerInput = document.getElementById("chatgpt-bearer");
+    const bearerToken = bearerInput.hidden ? "" : bearerInput.value.trim();
 
-    if (!bearerToken) return;
+    if (!bearerInput.hidden && !bearerToken) return;
 
     btn.disabled = true;
     btn.textContent = "⏳ Fetching…";
@@ -277,6 +334,7 @@ if (chatgptForm) {
         const data = await resp.json();
         resultDiv.className = "fetch-result fetch-result-error";
         resultDiv.textContent = data.error || "Unknown error occurred.";
+        revealCredFields(["chatgpt-bearer"], "chatgpt-saved-badge", "chatgpt-edit-btn");
         btn.disabled = false;
         btn.textContent = "🔄 Fetch invoices";
         return;
@@ -319,6 +377,7 @@ if (chatgptForm) {
           } else if (event.type === "error") {
             resultDiv.className = "fetch-result fetch-result-error";
             resultDiv.textContent = event.error;
+            revealCredFields(["chatgpt-bearer"], "chatgpt-saved-badge", "chatgpt-edit-btn");
           }
         }
       }
@@ -342,10 +401,12 @@ if (freeLoginForm) {
     const btn = document.getElementById("fetch-free-login-btn");
     const resultDiv = document.getElementById("fetch-free-result");
     const otpForm = document.getElementById("fetch-free-otp-form");
-    const username = document.getElementById("free-username").value.trim();
-    const password = document.getElementById("free-password").value;
+    const usernameInput = document.getElementById("free-username");
+    const passwordInput = document.getElementById("free-password");
+    const username = usernameInput.hidden ? "" : usernameInput.value.trim();
+    const password = passwordInput.hidden ? "" : passwordInput.value;
 
-    if (!username || !password) return;
+    if (!usernameInput.hidden && (!username || !password)) return;
     btn.disabled = true;
     btn.textContent = "Logging in…";
     resultDiv.hidden = false;
@@ -362,6 +423,7 @@ if (freeLoginForm) {
       if (!resp.ok) {
         resultDiv.className = "fetch-result fetch-result-error";
         resultDiv.textContent = data.error || "Login failed";
+        revealCredFields(["free-username", "free-password"], "free-saved-badge", "free-edit-btn");
         return;
       }
 

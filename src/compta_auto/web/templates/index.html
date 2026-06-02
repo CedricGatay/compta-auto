@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Compta Auto</title>
     <link rel="stylesheet" href="/static/styles.css?v=5">
-    <script src="/static/app.js?v=13" defer></script>
+    <script src="/static/app.js?v=14" defer></script>
   </head>
   <body>
     <header>
@@ -443,8 +443,10 @@
           </p>
           <form id="fetch-spotify-form" class="fetch-form">
             <div class="fetch-input-row">
-              <input type="text" name="sp_dc" id="spotify-sp-dc" placeholder="Paste your sp_dc cookie value here…" required autocomplete="off">
+              <span class="cred-saved-badge" id="spotify-saved-badge" hidden>🔑 Saved</span>
+              <input type="text" name="sp_dc" id="spotify-sp-dc" placeholder="Paste your sp_dc cookie value here…" autocomplete="off">
               <button type="submit" class="btn btn-primary" id="fetch-spotify-btn">🔄 Fetch invoices</button>
+              <button type="button" class="btn btn-sm btn-link cred-edit-btn" id="spotify-edit-btn" hidden>✏️</button>
             </div>
           </form>
           <div id="fetch-spotify-result" class="fetch-result" hidden></div>
@@ -461,8 +463,10 @@
           </p>
           <form id="fetch-chatgpt-form" class="fetch-form">
             <div class="fetch-input-row">
-              <input type="text" name="bearer_token" id="chatgpt-bearer" placeholder="Paste your Bearer token here…" required autocomplete="off">
+              <span class="cred-saved-badge" id="chatgpt-saved-badge" hidden>🔑 Saved</span>
+              <input type="text" name="bearer_token" id="chatgpt-bearer" placeholder="Paste your Bearer token here…" autocomplete="off">
               <button type="submit" class="btn btn-primary" id="fetch-chatgpt-btn">🔄 Fetch invoices</button>
+              <button type="button" class="btn btn-sm btn-link cred-edit-btn" id="chatgpt-edit-btn" hidden>✏️</button>
             </div>
           </form>
           <div id="fetch-chatgpt-result" class="fetch-result" hidden></div>
@@ -476,9 +480,11 @@
           </p>
           <form id="fetch-free-login-form" class="fetch-form">
             <div class="fetch-input-row">
-              <input type="text" name="username" id="free-username" placeholder="8-digit subscriber ID" required autocomplete="off" pattern="\d{8}" style="max-width:160px">
-              <input type="password" name="password" id="free-password" placeholder="Password" required autocomplete="off">
+              <span class="cred-saved-badge" id="free-saved-badge" hidden>🔑 Saved</span>
+              <input type="text" name="username" id="free-username" placeholder="8-digit subscriber ID" autocomplete="off" pattern="\d{8}" style="max-width:160px">
+              <input type="password" name="password" id="free-password" placeholder="Password" autocomplete="off">
               <button type="submit" class="btn btn-primary" id="fetch-free-login-btn">🔑 Login</button>
+              <button type="button" class="btn btn-sm btn-link cred-edit-btn" id="free-edit-btn" hidden>✏️</button>
             </div>
           </form>
           <form id="fetch-free-otp-form" class="fetch-form" hidden>
