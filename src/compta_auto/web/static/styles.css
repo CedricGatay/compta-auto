@@ -105,6 +105,11 @@ header {
 }
 
 .header-form input[type="number"] { width: 50px; }
+.input-unit {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+  margin-left: 2px;
+}
 
 .header-form select {
   font-size: 0.8rem;
