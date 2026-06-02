@@ -202,7 +202,7 @@
                 <span class="count-label">{{ renamed_docs|length }}</span>
               </div>
               <div class="kanban-items">
-                {% set sorted_renamed = renamed_docs|sort(attribute='detected_date', reverse=true) %}
+                {% set sorted_renamed = renamed_docs|sort(attribute='month_key', reverse=true) %}
                 {% for month, group in sorted_renamed|groupby(attribute='month_key')|reverse %}
                 <div class="kanban-month-group">
                   <div class="kanban-month-label">{{ month }}</div>
@@ -261,7 +261,7 @@
                 <span class="count-label">{{ included_docs|length }}</span>
               </div>
               <div class="kanban-items">
-                {% set sorted_included = included_docs|sort(attribute='detected_date', reverse=true) %}
+                {% set sorted_included = included_docs|sort(attribute='month_key', reverse=true) %}
                 {% for month, group in sorted_included|groupby(attribute='month_key')|reverse %}
                 <div class="kanban-month-group">
                   <div class="kanban-month-label">{{ month }}</div>
@@ -305,7 +305,7 @@
                 <span class="count-label">{{ skipped_docs|length }}</span>
               </div>
               <div class="kanban-items">
-                {% set sorted_skipped = skipped_docs|sort(attribute='detected_date', reverse=true) %}
+                {% set sorted_skipped = skipped_docs|sort(attribute='month_key', reverse=true) %}
                 {% for month, group in sorted_skipped|groupby(attribute='month_key')|reverse %}
                 <div class="kanban-month-group">
                   <div class="kanban-month-label">{{ month }}</div>
