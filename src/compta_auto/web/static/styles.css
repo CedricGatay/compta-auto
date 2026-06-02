@@ -430,6 +430,9 @@ input[type="password"] { font-family: monospace; }
   grid-template-columns: 1fr 1fr 1fr;
   gap: 12px;
 }
+.kanban-board[hidden] {
+  display: none;
+}
 .kanban-column {
   border-radius: var(--radius-lg);
   padding: 14px;
