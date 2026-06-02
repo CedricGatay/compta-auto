@@ -256,6 +256,9 @@ if (spotifyForm) {
         btn.textContent = "🔄 Fetch invoices";
         return;
       }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
       let buffer = "";
 
       while (true) {
