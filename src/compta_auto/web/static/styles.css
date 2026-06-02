@@ -407,6 +407,24 @@ input[type="password"] { font-family: monospace; }
 
 /* === KANBAN BOARD === */
 .doc-kanban-section { margin-top: 1.5rem; }
+.kanban-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.kanban-section-header .section-title { margin-bottom: 0; }
+.kanban-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.collapse-month-btn {
+  font-size: 0.75rem;
+  min-width: 24px;
+}
 .kanban-board {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;

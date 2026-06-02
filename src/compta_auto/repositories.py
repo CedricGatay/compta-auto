@@ -353,6 +353,13 @@ class Repository:
             (status, document_id),
         )
 
+    def delete_document(self, document_id: int) -> None:
+        """Permanently dismiss a document (marked so it won't reappear in the UI)."""
+        self.conn.execute(
+            "UPDATE documents SET status = 'permanently_dismissed', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (document_id,),
+        )
+
     def bulk_update_document_status_by_sender(
         self, match_type: str, match_value: str, target_status: str
     ) -> None:

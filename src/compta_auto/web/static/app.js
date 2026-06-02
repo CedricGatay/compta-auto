@@ -664,3 +664,58 @@ if (exportAllBtn) {
     if (e.key === "Escape" && !modal.hidden) close();
   });
 })();
+
+// === Month kanban: collapse & bulk actions ===
+(function() {
+  // Collapse toggle
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest(".collapse-month-btn");
+    if (!btn) return;
+    const section = btn.closest(".doc-kanban-section");
+    const board = section.querySelector(".kanban-board");
+    const collapsed = board.hidden;
+    board.hidden = !collapsed;
+    btn.textContent = collapsed ? "▼" : "▶";
+  });
+
+  // Bulk status change
+  async function bulkStatus(ids, status) {
+    if (!ids.length) return;
+    await fetch("/documents/bulk-status", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ids, status}),
+    });
+    location.reload();
+  }
+
+  // Bulk dismiss (permanent)
+  async function bulkDismiss(ids) {
+    if (!ids.length) return;
+    await fetch("/documents/bulk-delete", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ids}),
+    });
+    location.reload();
+  }
+
+  function parseIds(btn) {
+    const raw = btn.dataset.ids || "";
+    return raw.split(",").filter(Boolean).map(Number);
+  }
+
+  document.addEventListener("click", (e) => {
+    const inclBtn = e.target.closest(".bulk-include-month");
+    if (inclBtn) { bulkStatus(parseIds(inclBtn), "doc_included"); return; }
+
+    const skipBtn = e.target.closest(".bulk-skip-month");
+    if (skipBtn) { bulkStatus(parseIds(skipBtn), "review_ignored"); return; }
+
+    const dismissBtn = e.target.closest(".bulk-dismiss-month");
+    if (dismissBtn) {
+      if (!confirm("Permanently dismiss these skipped documents? They won't reappear.")) return;
+      bulkDismiss(parseIds(dismissBtn));
+    }
+  });
+})();

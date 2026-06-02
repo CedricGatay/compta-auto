@@ -197,10 +197,27 @@
         {% set month_renamed = renamed_docs|selectattr('month_key', 'equalto', current_month)|list %}
         {% set month_included = included_docs|selectattr('month_key', 'equalto', current_month)|list %}
         {% set month_skipped = skipped_docs|selectattr('month_key', 'equalto', current_month)|list %}
-        <section class="doc-kanban-section">
-          <h2 class="section-title">📂 {{ current_month }}
-            <span class="count-label">{{ month_renamed|length + month_included|length + month_skipped|length }}</span>
-          </h2>
+        <section class="doc-kanban-section" data-month="{{ current_month }}">
+          <div class="kanban-section-header">
+            <h2 class="section-title">📂 {{ current_month }}
+              <span class="count-label">{{ month_renamed|length + month_included|length + month_skipped|length }}</span>
+            </h2>
+            <div class="kanban-section-actions">
+              <button type="button" class="btn btn-primary btn-xs bulk-include-month"
+                data-ids="{{ month_renamed|map(attribute='id')|list|join(',') }}"
+                title="Include all 'To sort' documents for this month"
+                {% if not month_renamed %}disabled{% endif %}>✓ Include all</button>
+              <button type="button" class="btn btn-ghost btn-xs bulk-skip-month"
+                data-ids="{{ month_renamed|map(attribute='id')|list|join(',') }}"
+                title="Skip all 'To sort' documents for this month"
+                {% if not month_renamed %}disabled{% endif %}>✗ Skip all</button>
+              <button type="button" class="btn btn-danger-outline btn-xs bulk-dismiss-month"
+                data-ids="{{ month_skipped|map(attribute='id')|list|join(',') }}"
+                title="Permanently dismiss all skipped documents for this month"
+                {% if not month_skipped %}disabled{% endif %}>🗑 Clear skipped</button>
+              <button type="button" class="btn btn-ghost btn-xs collapse-month-btn" title="Collapse/expand">▼</button>
+            </div>
+          </div>
           <div class="kanban-board">
             <!-- TO SORT COLUMN -->
             <div class="kanban-column kanban-col-pending">

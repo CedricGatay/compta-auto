@@ -465,6 +465,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         repo.update_document_status(document_id, status)
         return RedirectResponse("/", status_code=303)
 
+    @app.post("/documents/bulk-status")
+    def bulk_update_document_status(
+        request: Request,
+        repo: Repository = Depends(get_repo),
+    ) -> RedirectResponse:
+        """Bulk update status for multiple documents (by IDs or month filter)."""
+        import asyncio
+        body = asyncio.get_event_loop().run_until_complete(request.json())
+        doc_ids: list[int] = body.get("ids", [])
+        status: str = body.get("status", "")
+        if not doc_ids or not status:
+            raise HTTPException(status_code=400, detail="ids and status required")
+        for doc_id in doc_ids:
+            repo.update_document_status(doc_id, status)
+        return JSONResponse({"ok": True, "count": len(doc_ids)})
+
+    @app.post("/documents/bulk-delete")
+    def bulk_delete_documents(
+        request: Request,
+        repo: Repository = Depends(get_repo),
+    ) -> JSONResponse:
+        """Permanently delete documents (they won't come back on re-scan)."""
+        import asyncio
+        body = asyncio.get_event_loop().run_until_complete(request.json())
+        doc_ids: list[int] = body.get("ids", [])
+        if not doc_ids:
+            raise HTTPException(status_code=400, detail="ids required")
+        for doc_id in doc_ids:
+            repo.delete_document(doc_id)
+        return JSONResponse({"ok": True, "count": len(doc_ids)})
+
     @app.post("/documents/bulk-rule")
     def bulk_document_rule(
         document_id: int = Form(...),
