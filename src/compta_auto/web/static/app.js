@@ -586,15 +586,45 @@ if (exportAllBtn) {
   });
 }
 
-// === Inline rename toggle ===
-document.addEventListener("click", (e) => {
-  const btn = e.target.closest(".inline-rename-toggle");
-  if (!btn) return;
-  const container = btn.closest("article") || btn.closest(".kanban-card");
-  if (!container) return;
-  const form = container.querySelector(".inline-rename-form");
-  if (form) {
-    form.hidden = !form.hidden;
-    if (!form.hidden) form.querySelector("input")?.focus();
+// === Rename modal ===
+(function() {
+  const modal = document.getElementById("rename-modal");
+  const backdrop = document.getElementById("rename-modal-backdrop");
+  const form = document.getElementById("rename-modal-form");
+  const dateInput = document.getElementById("rename-modal-date");
+  const vendorInput = document.getElementById("rename-modal-vendor");
+  const filenameEl = document.getElementById("rename-modal-filename");
+  const closeBtn = document.getElementById("rename-close-button");
+  const cancelBtn = document.getElementById("rename-cancel-button");
+
+  function openRenameModal(docId, date, vendor, name) {
+    form.action = `/documents/${docId}/rename`;
+    dateInput.value = date;
+    vendorInput.value = vendor;
+    filenameEl.textContent = name;
+    modal.hidden = false;
+    dateInput.focus();
   }
-});
+
+  function closeRenameModal() {
+    modal.hidden = true;
+  }
+
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest(".inline-rename-toggle");
+    if (!btn) return;
+    openRenameModal(
+      btn.dataset.docId,
+      btn.dataset.docDate,
+      btn.dataset.docVendor,
+      btn.dataset.docName
+    );
+  });
+
+  backdrop.addEventListener("click", closeRenameModal);
+  closeBtn.addEventListener("click", closeRenameModal);
+  cancelBtn.addEventListener("click", closeRenameModal);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !modal.hidden) closeRenameModal();
+  });
+})();

@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Compta Auto</title>
-    <link rel="stylesheet" href="/static/styles.css?v=6">
-    <script src="/static/app.js?v=17" defer></script>
+    <link rel="stylesheet" href="/static/styles.css?v=7">
+    <script src="/static/app.js?v=18" defer></script>
   </head>
   <body>
     <header>
@@ -222,7 +222,9 @@
                       <button name="status" value="doc_included" class="btn btn-primary btn-xs">✓ Include</button>
                       <button name="status" value="review_ignored" class="btn btn-ghost btn-xs">✗ Skip</button>
                     </form>
-                    <button type="button" class="btn btn-outline btn-xs inline-rename-toggle">✏️</button>
+                    <button type="button" class="btn btn-outline btn-xs inline-rename-toggle"
+                      data-doc-id="{{ document.id }}" data-doc-date="{{ document.detected_date or '' }}" data-doc-vendor="{{ document.detected_vendor or '' }}"
+                      data-doc-name="{{ document.final_filename or document.original_filename }}">✏️</button>
                     {% if document.source_id %}
                     <form method="post" action="/documents/bulk-rule" class="inline-form">
                       <input type="hidden" name="document_id" value="{{ document.id }}">
@@ -236,11 +238,6 @@
                     </form>
                     {% endif %}
                   </div>
-                  <form class="inline-rename-form" method="post" action="/documents/{{ document.id }}/rename" hidden>
-                    <input name="date" type="date" value="{{ document.detected_date or '' }}" required>
-                    <input name="vendor" value="{{ document.detected_vendor or '' }}" placeholder="vendor" required>
-                    <button type="submit" class="btn btn-primary btn-xs">Rename</button>
-                  </form>
                 </article>
                 {% endfor %}
                 {% if not renamed_docs %}
@@ -275,13 +272,10 @@
                       <button name="status" value="renamed" class="btn btn-ghost btn-xs">← Unsort</button>
                       <button name="status" value="review_ignored" class="btn btn-ghost btn-xs">→ Skip</button>
                     </form>
-                    <button type="button" class="btn btn-outline btn-xs inline-rename-toggle">✏️</button>
+                    <button type="button" class="btn btn-outline btn-xs inline-rename-toggle"
+                      data-doc-id="{{ document.id }}" data-doc-date="{{ document.detected_date or '' }}" data-doc-vendor="{{ document.detected_vendor or '' }}"
+                      data-doc-name="{{ document.final_filename or document.original_filename }}">✏️</button>
                   </div>
-                  <form class="inline-rename-form" method="post" action="/documents/{{ document.id }}/rename" hidden>
-                    <input name="date" type="date" value="{{ document.detected_date or '' }}" required>
-                    <input name="vendor" value="{{ document.detected_vendor or '' }}" placeholder="vendor" required>
-                    <button type="submit" class="btn btn-primary btn-xs">Rename</button>
-                  </form>
                 </article>
                 {% endfor %}
                 {% if not included_docs %}
@@ -559,16 +553,13 @@
                 <span class="export-item-meta">{{ document.detected_vendor or "" }}</span>
               </div>
               <div class="export-item-actions">
-                <button type="button" class="btn btn-outline btn-xs inline-rename-toggle" title="Rename">✏️</button>
+                <button type="button" class="btn btn-outline btn-xs inline-rename-toggle" title="Rename"
+                  data-doc-id="{{ document.id }}" data-doc-date="{{ document.detected_date or '' }}" data-doc-vendor="{{ document.detected_vendor or '' }}"
+                  data-doc-name="{{ document.final_filename or document.supposed_filename or document.original_filename }}">✏️</button>
                 <form method="post" action="/documents/{{ document.id }}/status" class="inline-form">
                   <button name="status" value="review_ignored" class="btn btn-ghost btn-xs" title="Exclude from export">✗ Ignore</button>
                 </form>
               </div>
-              <form class="inline-rename-form" method="post" action="/documents/{{ document.id }}/rename" hidden>
-                <input name="date" type="date" value="{{ document.detected_date or '' }}" required>
-                <input name="vendor" value="{{ document.detected_vendor or '' }}" placeholder="vendor" required>
-                <button type="submit" class="btn btn-primary btn-xs">Rename</button>
-              </form>
             </article>
           {% endfor %}
           {% if ns.current_folder %}
@@ -650,6 +641,37 @@
       </div>
     </main>
 
+    <!-- RENAME MODAL -->
+    <div class="rename-modal" id="rename-modal" hidden>
+      <div class="rename-modal-backdrop" id="rename-modal-backdrop"></div>
+      <div class="rename-modal-panel" role="dialog" aria-modal="true" aria-labelledby="rename-modal-title">
+        <div class="rename-modal-header">
+          <h2 id="rename-modal-title">Rename document</h2>
+          <button class="btn btn-ghost btn-sm" id="rename-close-button" type="button">✕</button>
+        </div>
+        <div class="rename-modal-body">
+          <p class="rename-modal-filename" id="rename-modal-filename"></p>
+          <form id="rename-modal-form" method="post" action="">
+            <div class="rename-modal-fields">
+              <label class="rename-field">
+                <span class="rename-field-label">Date</span>
+                <input name="date" type="date" id="rename-modal-date" required>
+              </label>
+              <label class="rename-field">
+                <span class="rename-field-label">Vendor</span>
+                <input name="vendor" id="rename-modal-vendor" placeholder="vendor" required>
+              </label>
+            </div>
+            <div class="rename-modal-actions">
+              <button type="button" class="btn btn-ghost" id="rename-cancel-button">Cancel</button>
+              <button type="submit" class="btn btn-primary">Rename</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- PREVIEW MODAL -->
     <div class="preview-modal" id="preview-modal" hidden>
       <div class="preview-modal-backdrop" id="preview-modal-backdrop"></div>
       <div class="preview-modal-panel" role="dialog" aria-modal="true" aria-labelledby="preview-modal-title">

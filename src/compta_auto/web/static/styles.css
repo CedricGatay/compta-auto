@@ -1153,29 +1153,90 @@ button.preview { color: inherit; cursor: pointer; padding: 0; }
   align-items: center;
 }
 
-/* === INLINE RENAME FORM === */
-.inline-rename-form {
+/* === RENAME MODAL === */
+.rename-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 0 4px;
-  flex-wrap: wrap;
+  justify-content: center;
 }
-.inline-rename-form input[type="date"] {
-  max-width: 150px;
-  font-size: 0.8rem;
+.rename-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
 }
-.inline-rename-form input[name="vendor"] {
-  max-width: 140px;
-  font-size: 0.8rem;
+.rename-modal-panel {
+  position: relative;
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  width: 90%;
+  max-width: 420px;
+  animation: modal-in 0.2s ease-out;
 }
-.export-item .inline-rename-form {
-  width: 100%;
-  padding-left: 64px;
+@keyframes modal-in {
+  from { opacity: 0; transform: scale(0.95) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
 }
-.kanban-card .inline-rename-form {
-  border-top: 1px solid var(--color-border-light);
-  padding-top: 8px;
+.rename-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--color-border-light);
+}
+.rename-modal-header h2 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0;
+}
+.rename-modal-body {
+  padding: 16px 20px 20px;
+}
+.rename-modal-filename {
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  margin: 0 0 14px;
+  word-break: break-all;
+}
+.rename-modal-fields {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.rename-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+.rename-field-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.rename-field input {
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  background: var(--color-bg);
+  transition: border-color var(--transition-fast);
+}
+.rename-field input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-light);
+}
+.rename-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 /* === RESPONSIVE === */
