@@ -519,6 +519,9 @@ def enrich_document(row: dict[str, Any]) -> dict[str, Any]:
     )
     row["modal_preview_kind"] = row["preview_kind"]
     row["final_preview_url"] = f"/documents/{row['id']}/final" if row.get("final_path") else None
+    # Month key for grouping (YYYY-MM or "Unknown")
+    detected_date = row.get("detected_date") or ""
+    row["month_key"] = detected_date[:7] if len(detected_date) >= 7 else "Unknown"
     return row
 
 
