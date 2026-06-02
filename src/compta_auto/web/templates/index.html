@@ -189,25 +189,29 @@
         </section>
         {% endif %}
 
-        <!-- RENAMED DOCUMENTS KANBAN -->
+        <!-- RENAMED DOCUMENTS KANBAN — one board per month -->
         {% if renamed_docs or included_docs or skipped_docs %}
+        {% set all_docs = renamed_docs + included_docs + skipped_docs %}
+        {% set all_months = all_docs|map(attribute='month_key')|unique|sort(reverse=true)|list %}
+        {% for current_month in all_months %}
+        {% set month_renamed = renamed_docs|selectattr('month_key', 'equalto', current_month)|list %}
+        {% set month_included = included_docs|selectattr('month_key', 'equalto', current_month)|list %}
+        {% set month_skipped = skipped_docs|selectattr('month_key', 'equalto', current_month)|list %}
         <section class="doc-kanban-section">
-          <h2 class="section-title">📂 Sort renamed documents</h2>
+          <h2 class="section-title">📂 {{ current_month }}
+            <span class="count-label">{{ month_renamed|length + month_included|length + month_skipped|length }}</span>
+          </h2>
           <div class="kanban-board">
             <!-- TO SORT COLUMN -->
             <div class="kanban-column kanban-col-pending">
               <div class="kanban-header">
                 <span class="kanban-header-icon">📥</span>
                 <span class="kanban-header-title">To sort</span>
-                <span class="count-label">{{ renamed_docs|length }}</span>
+                <span class="count-label">{{ month_renamed|length }}</span>
               </div>
               <div class="kanban-items">
-                {% set sorted_renamed = renamed_docs|sort(attribute='month_key', reverse=true) %}
-                {% for month, group in sorted_renamed|groupby(attribute='month_key')|reverse %}
-                <div class="kanban-month-group">
-                  <div class="kanban-month-label">{{ month }}</div>
-                  {% for document in group %}
-                  <article class="kanban-card">
+                {% for document in month_renamed %}
+                <article class="kanban-card">
                   <div class="kanban-card-top">
                     <button class="preview preview-sm" type="button"
                       data-preview-url="{{ document.final_preview_url or document.raw_preview_url }}" data-open-url="{{ document.raw_open_url }}"
@@ -243,12 +247,10 @@
                     </form>
                     {% endif %}
                   </div>
-                  </article>
-                  {% endfor %}
-                </div>
+                </article>
                 {% endfor %}
-                {% if not renamed_docs %}
-                <div class="kanban-empty">Nothing to sort</div>
+                {% if not month_renamed %}
+                <div class="kanban-empty">—</div>
                 {% endif %}
               </div>
             </div>
@@ -258,15 +260,11 @@
               <div class="kanban-header">
                 <span class="kanban-header-icon">✓</span>
                 <span class="kanban-header-title">Included</span>
-                <span class="count-label">{{ included_docs|length }}</span>
+                <span class="count-label">{{ month_included|length }}</span>
               </div>
               <div class="kanban-items">
-                {% set sorted_included = included_docs|sort(attribute='month_key', reverse=true) %}
-                {% for month, group in sorted_included|groupby(attribute='month_key')|reverse %}
-                <div class="kanban-month-group">
-                  <div class="kanban-month-label">{{ month }}</div>
-                  {% for document in group %}
-                  <article class="kanban-card kanban-card-included">
+                {% for document in month_included %}
+                <article class="kanban-card kanban-card-included">
                   <div class="kanban-card-top">
                     <button class="preview preview-sm" type="button"
                       data-preview-url="{{ document.final_preview_url or document.raw_preview_url }}" data-open-url="{{ document.raw_open_url }}"
@@ -287,12 +285,10 @@
                       data-doc-id="{{ document.id }}" data-doc-date="{{ document.detected_date or '' }}" data-doc-vendor="{{ document.detected_vendor or '' }}"
                       data-doc-name="{{ document.final_filename or document.original_filename }}">✏️</button>
                   </div>
-                  </article>
-                  {% endfor %}
-                </div>
+                </article>
                 {% endfor %}
-                {% if not included_docs %}
-                <div class="kanban-empty">No included documents yet</div>
+                {% if not month_included %}
+                <div class="kanban-empty">—</div>
                 {% endif %}
               </div>
             </div>
@@ -302,15 +298,11 @@
               <div class="kanban-header">
                 <span class="kanban-header-icon">✗</span>
                 <span class="kanban-header-title">Skipped</span>
-                <span class="count-label">{{ skipped_docs|length }}</span>
+                <span class="count-label">{{ month_skipped|length }}</span>
               </div>
               <div class="kanban-items">
-                {% set sorted_skipped = skipped_docs|sort(attribute='month_key', reverse=true) %}
-                {% for month, group in sorted_skipped|groupby(attribute='month_key')|reverse %}
-                <div class="kanban-month-group">
-                  <div class="kanban-month-label">{{ month }}</div>
-                  {% for document in group %}
-                  <article class="kanban-card kanban-card-skipped">
+                {% for document in month_skipped %}
+                <article class="kanban-card kanban-card-skipped">
                   <div class="kanban-card-top">
                     <button class="preview preview-sm" type="button"
                       data-preview-url="{{ document.raw_preview_url }}" data-open-url="{{ document.raw_open_url }}"
@@ -328,17 +320,16 @@
                       <button name="status" value="doc_included" class="btn btn-outline btn-xs">← Include</button>
                     </form>
                   </div>
-                  </article>
-                  {% endfor %}
-                </div>
+                </article>
                 {% endfor %}
-                {% if not skipped_docs %}
-                <div class="kanban-empty">No skipped documents</div>
+                {% if not month_skipped %}
+                <div class="kanban-empty">—</div>
                 {% endif %}
               </div>
             </div>
           </div>
         </section>
+        {% endfor %}
         {% endif %}
 
         {% if not triage_docs and not renamed_docs and not included_docs and not skipped_docs %}
