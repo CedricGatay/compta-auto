@@ -511,6 +511,83 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Attachment not found")
         return preview_file_response(attachment["path"], filename or attachment["filename"])
 
+    @app.get("/api/export-preview")
+    def api_export_preview(repo: Repository = Depends(get_repo)):
+        """Return documents ready for export, grouped by YYYY/MM."""
+        docs = repo.list_documents(status="doc_included")
+        # Build tree grouped by date
+        tree: dict[str, list] = {}
+        for doc in docs:
+            date_str = doc.get("detected_date") or ""
+            if len(date_str) >= 7:
+                folder = f"{date_str[:4]}/{date_str[5:7]}"
+            else:
+                folder = "unknown"
+            tree.setdefault(folder, []).append(doc)
+        return {"tree": tree, "total": len(docs)}
+
+    @app.post("/api/export")
+    def api_export(repo: Repository = Depends(get_repo)):
+        """Move all included documents to output_dir/YYYY/MM/filename."""
+        import shutil
+
+        output_base = app_settings.output_dir
+        # Allow override via app_state
+        custom_output = repo.get_app_state("output_dir")
+        if custom_output:
+            output_base = Path(custom_output)
+
+        docs = repo.list_documents(status="doc_included")
+        moved = 0
+        errors = []
+        for doc in docs:
+            date_str = doc.get("detected_date") or ""
+            if len(date_str) >= 7:
+                folder = f"{date_str[:4]}/{date_str[5:7]}"
+            else:
+                folder = "unknown"
+
+            # Use final_path (renamed) if available, else raw_path
+            source_path = Path(doc.get("final_path") or doc["raw_path"])
+            if not source_path.exists():
+                errors.append(f"Missing: {source_path.name}")
+                continue
+
+            filename = doc.get("final_filename") or source_path.name
+            dest_dir = output_base / folder
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest_file = dest_dir / filename
+
+            # Avoid overwriting
+            if dest_file.exists():
+                errors.append(f"Already exists: {folder}/{filename}")
+                continue
+
+            try:
+                shutil.copy2(source_path, dest_file)
+                repo.update_document_status(doc["id"], "exported")
+                moved += 1
+            except Exception as exc:
+                errors.append(f"{filename}: {exc}")
+
+        return {"moved": moved, "errors": errors, "output_dir": str(output_base)}
+
+    @app.post("/api/settings/output-dir")
+    async def api_set_output_dir(request: Request, repo: Repository = Depends(get_repo)):
+        """Set the output directory for export."""
+        body = await request.json()
+        path = body.get("path", "").strip()
+        if not path:
+            raise HTTPException(status_code=400, detail="Path is required")
+        repo.set_app_state("output_dir", path)
+        return {"path": path}
+
+    @app.get("/api/settings/output-dir")
+    def api_get_output_dir(repo: Repository = Depends(get_repo)):
+        """Get the configured output directory."""
+        custom = repo.get_app_state("output_dir")
+        return {"path": custom or str(app_settings.output_dir)}
+
     return app
 
 

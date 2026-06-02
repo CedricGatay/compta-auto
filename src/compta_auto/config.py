@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     db_path: Path = Field(default=Path("data/compta.sqlite3"))
     raw_dir: Path = Field(default=Path("data/raw"))
     renamed_dir: Path = Field(default=Path("data/renamed"))
+    output_dir: Path = Field(default=Path("data/output"))
     scan_folder: str | None = None
     accounting_domain: str = "ACCOUNTING_DOMAIN_PLACEHOLDER"
     min_rename_confidence: float = 0.82
@@ -26,6 +27,7 @@ class Settings(BaseSettings):
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         self.renamed_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
 
 def get_settings() -> Settings:

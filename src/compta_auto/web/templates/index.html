@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Compta Auto</title>
     <link rel="stylesheet" href="/static/styles.css?v=5">
-    <script src="/static/app.js?v=14" defer></script>
+    <script src="/static/app.js?v=15" defer></script>
   </head>
   <body>
     <header>
@@ -62,6 +62,11 @@
       <button class="tab" role="tab" aria-selected="false" data-tab="processed">Processed</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="providers">Providers</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="fetch">Fetch</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="export">
+        Export
+        {% set export_count = documents|selectattr("status", "equalto", "doc_included")|list|length %}
+        {% if export_count %}<span class="tab-count">{{ export_count }}</span>{% endif %}
+      </button>
       <button class="tab" role="tab" aria-selected="false" data-tab="settings">Settings</button>
     </nav>
 
@@ -497,6 +502,70 @@
         </section>
       </div>
 
+      <!-- EXPORT TAB -->
+      <div class="tab-panel" id="panel-export" role="tabpanel">
+        {% set export_docs = documents|selectattr("status", "equalto", "doc_included")|list %}
+
+        <div class="panel-header">
+          <h2 class="section-title">📦 Export preview <span class="count-label">{{ export_docs|length }}</span></h2>
+          <div class="panel-header-actions">
+            <span class="export-output-label">Output: <code id="export-output-path">loading…</code></span>
+            <button type="button" class="btn btn-outline btn-sm" id="export-change-dir-btn">📂 Change</button>
+            <button type="button" class="btn btn-primary" id="export-all-btn" {% if not export_docs %}disabled{% endif %}>
+              🚀 Rename &amp; move all ({{ export_docs|length }})
+            </button>
+          </div>
+        </div>
+
+        {% if export_docs %}
+        <div class="export-tree" id="export-tree">
+          {% set ns = namespace(current_folder="") %}
+          {% for document in export_docs|sort(attribute="detected_date") %}
+            {% set date_str = document.detected_date or "" %}
+            {% set folder = date_str[:4] ~ "/" ~ date_str[5:7] if date_str|length >= 7 else "unknown" %}
+            {% if folder != ns.current_folder %}
+              {% if ns.current_folder %}
+                </div></div>
+              {% endif %}
+              {% set ns.current_folder = folder %}
+              <div class="export-folder">
+                <div class="export-folder-header">📁 <strong>{{ folder }}/</strong></div>
+                <div class="export-folder-items">
+            {% endif %}
+            <article class="export-item">
+              <button class="preview preview-sm" type="button"
+                data-preview-url="{{ document.final_preview_url or document.raw_preview_url }}"
+                data-open-url="{{ document.raw_open_url }}"
+                data-preview-name="{{ document.final_filename or document.original_filename }}"
+                data-preview-kind="{{ document.modal_preview_kind }}">
+                <span class="preview-icon preview-icon-{{ document.preview_kind }}">{{ document.preview_label }}</span>
+              </button>
+              <div class="export-item-info">
+                <span class="export-item-filename" title="{{ document.final_filename or document.supposed_filename or document.original_filename }}">
+                  {{ document.final_filename or document.supposed_filename or document.original_filename }}
+                </span>
+                <span class="export-item-meta">{{ document.detected_vendor or "" }}</span>
+              </div>
+              <div class="export-item-actions">
+                <form method="post" action="/documents/{{ document.id }}/status" class="inline-form">
+                  <button name="status" value="review_ignored" class="btn btn-ghost btn-xs" title="Exclude from export">✗ Ignore</button>
+                </form>
+              </div>
+            </article>
+          {% endfor %}
+          {% if ns.current_folder %}
+            </div></div>
+          {% endif %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+          <p>No documents ready for export. Include documents from the Documents tab first.</p>
+        </div>
+        {% endif %}
+
+        <div id="export-result" class="fetch-result" hidden></div>
+      </div>
+
       <!-- SETTINGS TAB -->
       <div class="tab-panel" id="panel-settings" role="tabpanel">
         <h2 class="section-title">Rules</h2>
@@ -542,6 +611,7 @@
           <dt>Database</dt><dd><code>{{ settings.db_path }}</code></dd>
           <dt>Raw directory</dt><dd><code>{{ settings.raw_dir }}</code></dd>
           <dt>Renamed directory</dt><dd><code>{{ settings.renamed_dir }}</code></dd>
+          <dt>Output directory</dt><dd><code id="settings-output-dir">{{ settings.output_dir }}</code></dd>
           <dt>Accounting domain</dt><dd><code>{{ settings.accounting_domain }}</code></dd>
           <dt>Min confidence</dt><dd>{{ "%.0f%%"|format(settings.min_rename_confidence * 100) }}</dd>
           <dt>LLM extractor</dt><dd><code>{{ settings.llm_extractor_command or "not configured" }}</code></dd>

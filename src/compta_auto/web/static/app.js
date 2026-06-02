@@ -511,3 +511,74 @@ if (freeLoginForm) {
     }
   });
 }
+
+// === Export tab ===
+const exportAllBtn = document.getElementById("export-all-btn");
+const exportOutputPath = document.getElementById("export-output-path");
+const exportChangeDirBtn = document.getElementById("export-change-dir-btn");
+const exportResult = document.getElementById("export-result");
+
+// Load output dir
+if (exportOutputPath) {
+  fetch("/api/settings/output-dir")
+    .then((r) => r.json())
+    .then((data) => { exportOutputPath.textContent = data.path; })
+    .catch(() => {});
+}
+
+// Change output dir
+if (exportChangeDirBtn) {
+  exportChangeDirBtn.addEventListener("click", async () => {
+    const current = exportOutputPath?.textContent || "";
+    const newPath = prompt("Output directory path:", current);
+    if (!newPath || newPath === current) return;
+    try {
+      const resp = await fetch("/api/settings/output-dir", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: newPath }),
+      });
+      if (resp.ok) {
+        exportOutputPath.textContent = newPath;
+      }
+    } catch (e) {
+      alert("Failed to save: " + e.message);
+    }
+  });
+}
+
+// Export all
+if (exportAllBtn) {
+  exportAllBtn.addEventListener("click", async () => {
+    if (!confirm("Move all included documents to the output folder?")) return;
+    exportAllBtn.disabled = true;
+    exportAllBtn.textContent = "⏳ Exporting…";
+    exportResult.hidden = false;
+    exportResult.className = "fetch-result fetch-result-progress";
+    exportResult.textContent = "Moving files…";
+
+    try {
+      const resp = await fetch("/api/export", { method: "POST" });
+      const data = await resp.json();
+      if (data.moved > 0) {
+        exportResult.className = "fetch-result fetch-result-success";
+        let msg = `✅ Moved ${data.moved} file(s) to ${data.output_dir}`;
+        if (data.errors.length) msg += ` (${data.errors.length} error(s))`;
+        exportResult.textContent = msg;
+        setTimeout(() => window.location.reload(), 1500);
+      } else if (data.errors.length) {
+        exportResult.className = "fetch-result fetch-result-error";
+        exportResult.textContent = data.errors.join("; ");
+      } else {
+        exportResult.className = "fetch-result fetch-result-success";
+        exportResult.textContent = "Nothing to export.";
+      }
+    } catch (err) {
+      exportResult.className = "fetch-result fetch-result-error";
+      exportResult.textContent = `Error: ${err.message}`;
+    } finally {
+      exportAllBtn.disabled = false;
+      exportAllBtn.textContent = "🚀 Rename & move all";
+    }
+  });
+}
