@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Compta Auto</title>
     <link rel="stylesheet" href="/static/styles.css?v=5">
-    <script src="/static/app.js?v=15" defer></script>
+    <script src="/static/app.js?v=16" defer></script>
   </head>
   <body>
     <header>
@@ -222,6 +222,7 @@
                       <button name="status" value="doc_included" class="btn btn-primary btn-xs">✓ Include</button>
                       <button name="status" value="review_ignored" class="btn btn-ghost btn-xs">✗ Skip</button>
                     </form>
+                    <button type="button" class="btn btn-outline btn-xs inline-rename-toggle">✏️</button>
                     {% if document.source_id %}
                     <form method="post" action="/documents/bulk-rule" class="inline-form">
                       <input type="hidden" name="document_id" value="{{ document.id }}">
@@ -235,6 +236,11 @@
                     </form>
                     {% endif %}
                   </div>
+                  <form class="inline-rename-form" method="post" action="/documents/{{ document.id }}/rename" hidden>
+                    <input name="date" type="date" value="{{ document.detected_date or '' }}" required>
+                    <input name="vendor" value="{{ document.detected_vendor or '' }}" placeholder="vendor" required>
+                    <button type="submit" class="btn btn-primary btn-xs">Rename</button>
+                  </form>
                 </article>
                 {% endfor %}
                 {% if not renamed_docs %}
@@ -269,7 +275,13 @@
                       <button name="status" value="renamed" class="btn btn-ghost btn-xs">← Unsort</button>
                       <button name="status" value="review_ignored" class="btn btn-ghost btn-xs">→ Skip</button>
                     </form>
+                    <button type="button" class="btn btn-outline btn-xs inline-rename-toggle">✏️</button>
                   </div>
+                  <form class="inline-rename-form" method="post" action="/documents/{{ document.id }}/rename" hidden>
+                    <input name="date" type="date" value="{{ document.detected_date or '' }}" required>
+                    <input name="vendor" value="{{ document.detected_vendor or '' }}" placeholder="vendor" required>
+                    <button type="submit" class="btn btn-primary btn-xs">Rename</button>
+                  </form>
                 </article>
                 {% endfor %}
                 {% if not included_docs %}
@@ -547,10 +559,16 @@
                 <span class="export-item-meta">{{ document.detected_vendor or "" }}</span>
               </div>
               <div class="export-item-actions">
+                <button type="button" class="btn btn-outline btn-xs inline-rename-toggle" title="Rename">✏️</button>
                 <form method="post" action="/documents/{{ document.id }}/status" class="inline-form">
                   <button name="status" value="review_ignored" class="btn btn-ghost btn-xs" title="Exclude from export">✗ Ignore</button>
                 </form>
               </div>
+              <form class="inline-rename-form" method="post" action="/documents/{{ document.id }}/rename" hidden>
+                <input name="date" type="date" value="{{ document.detected_date or '' }}" required>
+                <input name="vendor" value="{{ document.detected_vendor or '' }}" placeholder="vendor" required>
+                <button type="submit" class="btn btn-primary btn-xs">Rename</button>
+              </form>
             </article>
           {% endfor %}
           {% if ns.current_folder %}

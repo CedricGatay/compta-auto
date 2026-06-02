@@ -582,3 +582,16 @@ if (exportAllBtn) {
     }
   });
 }
+
+// === Inline rename toggle ===
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest(".inline-rename-toggle");
+  if (!btn) return;
+  const container = btn.closest("article") || btn.closest(".kanban-card");
+  if (!container) return;
+  const form = container.querySelector(".inline-rename-form");
+  if (form) {
+    form.hidden = !form.hidden;
+    if (!form.hidden) form.querySelector("input")?.focus();
+  }
+});

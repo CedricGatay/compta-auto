@@ -1074,3 +1074,27 @@ button.preview { color: inherit; cursor: pointer; padding: 0; }
 .export-item-actions {
   flex-shrink: 0;
 }
+
+/* Inline rename form */
+.inline-rename-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  flex-wrap: wrap;
+}
+.inline-rename-form input[type="date"] {
+  max-width: 150px;
+  font-size: 0.82rem;
+}
+.inline-rename-form input[name="vendor"] {
+  max-width: 140px;
+  font-size: 0.82rem;
+}
+.export-item {
+  flex-wrap: wrap;
+}
+.export-item .inline-rename-form {
+  width: 100%;
+  padding-left: 42px;
+}
