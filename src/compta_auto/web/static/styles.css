@@ -1167,13 +1167,16 @@ button.preview { color: inherit; cursor: pointer; padding: 0; }
 }
 }
 .rename-modal-backdrop {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 1;
 }
 .rename-modal-panel {
   position: relative;
+  z-index: 2;
   background: var(--color-surface);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
