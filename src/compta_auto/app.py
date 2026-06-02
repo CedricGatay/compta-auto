@@ -11,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 
 from .config import Settings, get_settings
 from .db import Database
+from .mail_to_pdf import mail_to_pdf
 from .pipeline import AccountingPipeline, RunSummary
 from .normalize import email_domain
 from .renamer import rename_document_as
@@ -358,6 +359,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             mail = repo.get_mail(mail_id)
             if mail:
                 process_mail_now(app_settings, repo, mail)
+        return RedirectResponse("/", status_code=303)
+
+    @app.post("/mails/{mail_id}/to-pdf")
+    def mail_to_pdf_route(
+        mail_id: int, repo: Repository = Depends(get_repo)
+    ) -> RedirectResponse:
+        mail = repo.get_mail(mail_id)
+        if not mail:
+            raise HTTPException(status_code=404, detail="Mail not found")
+
+        # Generate a sanitized filename
+        subject_slug = "".join(
+            c if c.isalnum() or c in " -_" else "" for c in (mail["subject"] or "mail")
+        ).strip()[:60]
+        date_prefix = (mail["sent_at"] or "")[:10].replace("-", "") or "nodate"
+        filename = f"{date_prefix}_{subject_slug}.pdf"
+
+        output_path = app_settings.raw_dir / filename
+        mail_to_pdf(
+            subject=mail["subject"] or "(no subject)",
+            sender=mail["sender"] or "",
+            recipients=mail.get("recipients", "") or "",
+            sent_at=mail.get("sent_at"),
+            body=mail.get("body", "") or "",
+            output_path=output_path,
+        )
+
+        # Run through the document pipeline (handles hashing, dedup, metadata, rename)
+        pipeline = AccountingPipeline(app_settings, repo)
+        pipeline._process_local_file(output_path, RunSummary())
+
+        # Mark mail as processed
+        repo.update_mail_status(mail_id, "mail_auto_selected")
         return RedirectResponse("/", status_code=303)
 
     @app.post("/providers")
