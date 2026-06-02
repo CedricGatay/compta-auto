@@ -628,3 +628,39 @@ if (exportAllBtn) {
     if (e.key === "Escape" && !modal.hidden) closeRenameModal();
   });
 })();
+
+// === PDF Preview modal ===
+(function() {
+  const modal = document.getElementById("pdf-preview-modal");
+  const backdrop = document.getElementById("pdf-preview-backdrop");
+  const frame = document.getElementById("pdf-preview-frame");
+  const titleEl = document.getElementById("pdf-preview-title");
+  const saveForm = document.getElementById("pdf-preview-save-form");
+  const closeBtn = document.getElementById("pdf-preview-close");
+  const cancelBtn = document.getElementById("pdf-preview-cancel");
+
+  function open(mailId, subject) {
+    frame.src = `/mails/${mailId}/pdf-preview`;
+    titleEl.textContent = `PDF Preview — ${subject}`;
+    saveForm.action = `/mails/${mailId}/to-pdf`;
+    modal.hidden = false;
+  }
+
+  function close() {
+    modal.hidden = true;
+    frame.src = "about:blank";
+  }
+
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest(".mail-to-pdf-btn");
+    if (!btn) return;
+    open(btn.dataset.mailId, btn.dataset.mailSubject);
+  });
+
+  backdrop.addEventListener("click", close);
+  closeBtn.addEventListener("click", close);
+  cancelBtn.addEventListener("click", close);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !modal.hidden) close();
+  });
+})();

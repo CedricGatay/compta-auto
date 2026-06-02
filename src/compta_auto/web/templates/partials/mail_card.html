@@ -38,9 +38,9 @@
         <button name="status" value="mail_auto_selected" class="btn btn-primary btn-sm">✓ Process</button>
         <button name="status" value="mail_ignored" class="btn btn-ghost btn-sm">✗ Ignore</button>
       </form>
-      <form method="post" action="/mails/{{ mail.id }}/to-pdf" class="inline-form">
-        <button class="btn btn-outline btn-sm" title="Save mail body as PDF invoice">📄 Mail → PDF</button>
-      </form>
+      <button type="button" class="btn btn-outline btn-sm mail-to-pdf-btn"
+        data-mail-id="{{ mail.id }}" data-mail-subject="{{ mail.subject }}"
+        title="Preview & save mail body as PDF invoice">📄 Mail → PDF</button>
       <div class="action-divider"></div>
       <form method="post" action="/mails/{{ mail.id }}/rule">
         <input type="hidden" name="rule_type" value="always_process">

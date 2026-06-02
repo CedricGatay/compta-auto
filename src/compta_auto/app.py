@@ -361,6 +361,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 process_mail_now(app_settings, repo, mail)
         return RedirectResponse("/", status_code=303)
 
+    @app.get("/mails/{mail_id}/pdf-preview")
+    def mail_pdf_preview(
+        mail_id: int, repo: Repository = Depends(get_repo)
+    ) -> FileResponse:
+        """Generate a temporary PDF preview of the mail (not saved to pipeline)."""
+        import tempfile
+        mail = repo.get_mail(mail_id)
+        if not mail:
+            raise HTTPException(status_code=404, detail="Mail not found")
+        tmp = Path(tempfile.mktemp(suffix=".pdf"))
+        mail_to_pdf(
+            subject=mail["subject"] or "(no subject)",
+            sender=mail["sender"] or "",
+            recipients=mail.get("recipients", "") or "",
+            sent_at=mail.get("sent_at"),
+            body=mail.get("body", "") or "",
+            output_path=tmp,
+        )
+        return FileResponse(tmp, media_type="application/pdf", filename="preview.pdf")
+
     @app.post("/mails/{mail_id}/to-pdf")
     def mail_to_pdf_route(
         mail_id: int, repo: Repository = Depends(get_repo)

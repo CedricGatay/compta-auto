@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Compta Auto</title>
-    <link rel="stylesheet" href="/static/styles.css?v=7">
-    <script src="/static/app.js?v=18" defer></script>
+    <link rel="stylesheet" href="/static/styles.css?v=8">
+    <script src="/static/app.js?v=19" defer></script>
   </head>
   <body>
     <header>
@@ -640,6 +640,26 @@
         </div>
       </div>
     </main>
+
+    <!-- PDF PREVIEW MODAL -->
+    <div class="pdf-preview-modal" id="pdf-preview-modal" hidden>
+      <div class="pdf-preview-backdrop" id="pdf-preview-backdrop"></div>
+      <div class="pdf-preview-panel" role="dialog" aria-modal="true" aria-labelledby="pdf-preview-title">
+        <div class="pdf-preview-header">
+          <h2 id="pdf-preview-title">PDF Preview</h2>
+          <button class="btn btn-ghost btn-sm" id="pdf-preview-close" type="button">✕</button>
+        </div>
+        <div class="pdf-preview-body">
+          <iframe id="pdf-preview-frame" src="about:blank"></iframe>
+        </div>
+        <div class="pdf-preview-footer">
+          <button type="button" class="btn btn-ghost" id="pdf-preview-cancel">Cancel</button>
+          <form id="pdf-preview-save-form" method="post" action="">
+            <button type="submit" class="btn btn-primary">✓ Save as document</button>
+          </form>
+        </div>
+      </div>
+    </div>
 
     <!-- RENAME MODAL -->
     <div class="rename-modal" id="rename-modal" hidden>
