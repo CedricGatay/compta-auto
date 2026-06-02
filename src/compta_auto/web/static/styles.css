@@ -1162,6 +1162,10 @@ button.preview { color: inherit; cursor: pointer; padding: 0; }
   align-items: center;
   justify-content: center;
 }
+.rename-modal[hidden] {
+  display: none;
+}
+}
 .rename-modal-backdrop {
   position: absolute;
   inset: 0;
