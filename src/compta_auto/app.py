@@ -135,7 +135,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # --- Credentials management ---
 
-    CREDENTIAL_KEYS = ("spotify_sp_dc", "chatgpt_bearer", "free_username", "free_password")
+    CREDENTIAL_KEYS = ("spotify_sp_dc", "chatgpt_bearer", "free_username", "free_password", "freebox_username", "freebox_password", "orange_username", "orange_password", "sosh_username", "sosh_password")
 
     @app.get("/api/credentials")
     def api_get_credentials(repo: Repository = Depends(get_repo)):
@@ -296,6 +296,130 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         yield f"data: {json.dumps(event)}\n\n"
                         return
                 # Process through pipeline
+                if result.get("downloaded", 0) > 0:
+                    yield f"data: {json.dumps({'type': 'status', 'message': 'Processing documents…'})}\n\n"
+                    pipeline = AccountingPipeline(app_settings, repo)
+                    scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730)
+                    result["processed"] = scan_summary.renamed + scan_summary.rename_review_needed
+                yield f"data: {json.dumps({'type': 'complete', 'result': result})}\n\n"
+            except AuthError as exc:
+                yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+            except Exception as exc:
+                yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    @app.post("/api/orange-fetch")
+    def api_orange_fetch(
+        username: str = Form(""),
+        password: str = Form(""),
+        repo: Repository = Depends(get_repo),
+    ) -> StreamingResponse:
+        """Authenticate to Orange/Sosh and download all invoices (single step)."""
+        from .orange_invoices import fetch_orange_invoices_no_otp_stream, AuthError
+
+        effective_user = _get_cred(repo, "orange_username", username)
+        effective_pass = _get_cred(repo, "orange_password", password)
+        if not effective_user or not effective_pass:
+            return JSONResponse(status_code=400, content={"error": "No credentials provided or saved."})
+
+        # Save credentials for next time
+        repo.set_app_state("cred_orange_username", effective_user)
+        repo.set_app_state("cred_orange_password", effective_pass)
+
+        def event_stream():
+            try:
+                result = {"total": 0, "downloaded": 0, "skipped": 0, "errors": []}
+                for event in fetch_orange_invoices_no_otp_stream(effective_user, effective_pass, app_settings.raw_dir):
+                    if event["type"] in ("progress", "status"):
+                        yield f"data: {json.dumps(event)}\n\n"
+                    elif event["type"] == "done":
+                        result = event["result"]
+                    elif event["type"] == "error":
+                        yield f"data: {json.dumps(event)}\n\n"
+                        return
+                if result.get("downloaded", 0) > 0:
+                    yield f"data: {json.dumps({'type': 'status', 'message': 'Processing documents…'})}\n\n"
+                    pipeline = AccountingPipeline(app_settings, repo)
+                    scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730)
+                    result["processed"] = scan_summary.renamed + scan_summary.rename_review_needed
+                yield f"data: {json.dumps({'type': 'complete', 'result': result})}\n\n"
+            except AuthError as exc:
+                yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+            except Exception as exc:
+                yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    @app.post("/api/sosh-fetch")
+    def api_sosh_fetch(
+        username: str = Form(""),
+        password: str = Form(""),
+        repo: Repository = Depends(get_repo),
+    ) -> StreamingResponse:
+        """Authenticate to Sosh and download all invoices (single step)."""
+        from .orange_invoices import fetch_orange_invoices_no_otp_stream, AuthError
+
+        effective_user = _get_cred(repo, "sosh_username", username)
+        effective_pass = _get_cred(repo, "sosh_password", password)
+        if not effective_user or not effective_pass:
+            return JSONResponse(status_code=400, content={"error": "No credentials provided or saved."})
+
+        repo.set_app_state("cred_sosh_username", effective_user)
+        repo.set_app_state("cred_sosh_password", effective_pass)
+
+        def event_stream():
+            try:
+                result = {"total": 0, "downloaded": 0, "skipped": 0, "errors": []}
+                for event in fetch_orange_invoices_no_otp_stream(effective_user, effective_pass, app_settings.raw_dir, prefix="sosh"):
+                    if event["type"] in ("progress", "status"):
+                        yield f"data: {json.dumps(event)}\n\n"
+                    elif event["type"] == "done":
+                        result = event["result"]
+                    elif event["type"] == "error":
+                        yield f"data: {json.dumps(event)}\n\n"
+                        return
+                if result.get("downloaded", 0) > 0:
+                    yield f"data: {json.dumps({'type': 'status', 'message': 'Processing documents…'})}\n\n"
+                    pipeline = AccountingPipeline(app_settings, repo)
+                    scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730)
+                    result["processed"] = scan_summary.renamed + scan_summary.rename_review_needed
+                yield f"data: {json.dumps({'type': 'complete', 'result': result})}\n\n"
+            except AuthError as exc:
+                yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+            except Exception as exc:
+                yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    @app.post("/api/freebox-fetch")
+    def api_freebox_fetch(
+        username: str = Form(""),
+        password: str = Form(""),
+        repo: Repository = Depends(get_repo),
+    ) -> StreamingResponse:
+        """Authenticate to Freebox subscriber portal and download all invoices."""
+        from .freebox_invoices import fetch_freebox_invoices_stream, AuthError
+
+        effective_user = _get_cred(repo, "freebox_username", username)
+        effective_pass = _get_cred(repo, "freebox_password", password)
+        if not effective_user or not effective_pass:
+            return JSONResponse(status_code=400, content={"error": "No credentials provided or saved."})
+
+        repo.set_app_state("cred_freebox_username", effective_user)
+        repo.set_app_state("cred_freebox_password", effective_pass)
+
+        def event_stream():
+            try:
+                result = {"total": 0, "downloaded": 0, "skipped": 0, "errors": []}
+                for event in fetch_freebox_invoices_stream(effective_user, effective_pass, app_settings.raw_dir):
+                    if event["type"] in ("progress", "status"):
+                        yield f"data: {json.dumps(event)}\n\n"
+                    elif event["type"] == "done":
+                        result = event["result"]
+                    elif event["type"] == "error":
+                        yield f"data: {json.dumps(event)}\n\n"
+                        return
                 if result.get("downloaded", 0) > 0:
                     yield f"data: {json.dumps({'type': 'status', 'message': 'Processing documents…'})}\n\n"
                     pipeline = AccountingPipeline(app_settings, repo)

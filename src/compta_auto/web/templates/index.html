@@ -533,9 +533,61 @@
           </form>
           <div id="fetch-free-result" class="fetch-result" hidden></div>
         </section>
-      </div>
 
-      <!-- EXPORT TAB -->
+        <section class="fetch-section">
+          <h3>🍊 Orange / Sosh</h3>
+          <p class="fetch-description">
+            Download all Orange or Sosh invoices from your account.
+            Uses a headless browser — may take 15-30 seconds.
+          </p>
+          <form id="fetch-orange-form" class="fetch-form">
+            <div class="fetch-input-row">
+              <span class="cred-saved-badge" id="orange-saved-badge" hidden>🔑 Saved</span>
+              <input type="text" name="username" id="orange-username" placeholder="Email or phone" autocomplete="off" style="max-width:200px">
+              <input type="password" name="password" id="orange-password" placeholder="Password" autocomplete="off">
+              <button type="submit" class="btn btn-primary" id="fetch-orange-btn">📥 Fetch Invoices</button>
+              <button type="button" class="btn btn-sm btn-link cred-edit-btn" id="orange-edit-btn" hidden>✏️</button>
+            </div>
+          </form>
+          <div id="fetch-orange-result" class="fetch-result" hidden></div>
+        </section>
+
+        <section class="fetch-section">
+          <h3>🟢 Sosh</h3>
+          <p class="fetch-description">
+            Download all Sosh invoices from your account.
+            Uses a headless browser — may take 15-30 seconds.
+          </p>
+          <form id="fetch-sosh-form" class="fetch-form">
+            <div class="fetch-input-row">
+              <span class="cred-saved-badge" id="sosh-saved-badge" hidden>🔑 Saved</span>
+              <input type="text" name="username" id="sosh-username" placeholder="Email or phone" autocomplete="off" style="max-width:200px">
+              <input type="password" name="password" id="sosh-password" placeholder="Password" autocomplete="off">
+              <button type="submit" class="btn btn-primary" id="fetch-sosh-btn">📥 Fetch Invoices</button>
+              <button type="button" class="btn btn-sm btn-link cred-edit-btn" id="sosh-edit-btn" hidden>✏️</button>
+            </div>
+          </form>
+          <div id="fetch-sosh-result" class="fetch-result" hidden></div>
+        </section>
+
+        <section class="fetch-section">
+          <h3>📦 Freebox (ISP)</h3>
+          <p class="fetch-description">
+            Download all Freebox ISP invoices from your subscriber portal.
+            Uses your Freebox identifier and password (no OTP needed).
+          </p>
+          <form id="fetch-freebox-form" class="fetch-form">
+            <div class="fetch-input-row">
+              <span class="cred-saved-badge" id="freebox-saved-badge" hidden>🔑 Saved</span>
+              <input type="text" name="username" id="freebox-username" placeholder="Identifiant Freebox" autocomplete="off" style="max-width:200px">
+              <input type="password" name="password" id="freebox-password" placeholder="Mot de passe" autocomplete="off">
+              <button type="submit" class="btn btn-primary" id="fetch-freebox-btn">📥 Fetch Invoices</button>
+              <button type="button" class="btn btn-sm btn-link cred-edit-btn" id="freebox-edit-btn" hidden>✏️</button>
+            </div>
+          </form>
+          <div id="fetch-freebox-result" class="fetch-result" hidden></div>
+        </section>
+      </div>
       <div class="tab-panel" id="panel-export" role="tabpanel">
         {% set export_docs = documents|selectattr("status", "equalto", "doc_included")|list %}
 
