@@ -85,6 +85,7 @@ function revealCredFields(inputIds, badgeId, editBtnId) {
       { key: "orange_username", inputIds: ["orange-username", "orange-password"], badge: "orange-saved-badge", editBtn: "orange-edit-btn", also: "orange_password" },
       { key: "sosh_username", inputIds: ["sosh-username", "sosh-password"], badge: "sosh-saved-badge", editBtn: "sosh-edit-btn", also: "sosh_password" },
       { key: "freebox_username", inputIds: ["freebox-username", "freebox-password"], badge: "freebox-saved-badge", editBtn: "freebox-edit-btn", also: "freebox_password" },
+      { key: "engie_email", inputIds: ["engie-email", "engie-password"], badge: "engie-saved-badge", editBtn: "engie-edit-btn", also: "engie_password" },
     ];
 
     for (const m of mapping) {
@@ -736,6 +737,134 @@ if (freeboxForm) {
     } finally {
       btn.disabled = false;
       btn.textContent = "📥 Fetch Invoices";
+    }
+  });
+}
+
+// === Engie Pro fetch (2-step: login + OTP) ===
+const engieLoginForm = document.getElementById("fetch-engie-login-form");
+if (engieLoginForm) {
+  engieLoginForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById("fetch-engie-login-btn");
+    const resultDiv = document.getElementById("fetch-engie-result");
+    const emailInput = document.getElementById("engie-email");
+    const passwordInput = document.getElementById("engie-password");
+    const email = emailInput.hidden ? "" : emailInput.value.trim();
+    const password = passwordInput.hidden ? "" : passwordInput.value;
+
+    if (!emailInput.hidden && (!email || !password)) return;
+    btn.disabled = true;
+    btn.textContent = "Logging in…";
+    resultDiv.hidden = false;
+    resultDiv.className = "fetch-result fetch-result-progress";
+    resultDiv.textContent = "Authenticating…";
+
+    try {
+      const formData = new FormData();
+      formData.append("email", email);
+      formData.append("password", password);
+      const resp = await fetch("/api/engie-login", { method: "POST", body: formData });
+      const data = await resp.json();
+
+      if (!resp.ok) {
+        resultDiv.className = "fetch-result fetch-result-error";
+        resultDiv.textContent = data.error || `Server error: ${resp.status}`;
+        revealCredFields(["engie-email", "engie-password"], "engie-saved-badge", "engie-edit-btn");
+        return;
+      }
+
+      if (data.status === "otp_required") {
+        // Show OTP form
+        document.getElementById("engie-session-cookies").value = data.session_cookies;
+        document.getElementById("engie-factor-id").value = data.factor_id;
+        document.getElementById("engie-user-id").value = data.user_id;
+        document.getElementById("engie-form-build-id").value = data.form_build_id;
+        document.getElementById("fetch-engie-otp-form").hidden = false;
+        resultDiv.className = "fetch-result fetch-result-progress";
+        resultDiv.textContent = "Security code sent to your email. Enter it below.";
+        document.getElementById("engie-otp-code").focus();
+      } else {
+        resultDiv.className = "fetch-result fetch-result-success";
+        resultDiv.textContent = "Logged in without MFA (device trusted).";
+      }
+    } catch (err) {
+      resultDiv.className = "fetch-result fetch-result-error";
+      resultDiv.textContent = `Network error: ${err.message}`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "🔐 Login";
+    }
+  });
+}
+
+const engieOtpForm = document.getElementById("fetch-engie-otp-form");
+if (engieOtpForm) {
+  engieOtpForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById("fetch-engie-otp-btn");
+    const resultDiv = document.getElementById("fetch-engie-result");
+    const otpCode = document.getElementById("engie-otp-code").value.trim();
+    if (!otpCode || otpCode.length !== 6) return;
+
+    btn.disabled = true;
+    btn.textContent = "Validating…";
+    resultDiv.className = "fetch-result fetch-result-progress";
+    resultDiv.textContent = "Validating code and fetching invoices…";
+
+    try {
+      const formData = new FormData();
+      formData.append("session_cookies", document.getElementById("engie-session-cookies").value);
+      formData.append("factor_id", document.getElementById("engie-factor-id").value);
+      formData.append("user_id", document.getElementById("engie-user-id").value);
+      formData.append("form_build_id", document.getElementById("engie-form-build-id").value);
+      formData.append("otp_code", otpCode);
+      const resp = await fetch("/api/engie-otp", { method: "POST", body: formData });
+      if (!resp.ok) {
+        const data = await resp.json();
+        resultDiv.className = "fetch-result fetch-result-error";
+        resultDiv.textContent = data.error || `Server error: ${resp.status}`;
+        return;
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const event = JSON.parse(line.slice(6));
+          if (event.type === "progress") {
+            const pct = Math.round((event.current / event.total) * 100);
+            resultDiv.innerHTML = `<div class="fetch-progress-bar"><div class="fetch-progress-fill" style="width:${pct}%"></div></div><span>${event.message}</span>`;
+          } else if (event.type === "status") {
+            resultDiv.textContent = event.message;
+          } else if (event.type === "complete") {
+            const r = event.result;
+            resultDiv.className = "fetch-result fetch-result-success";
+            let msg = `Done! ${r.downloaded} downloaded, ${r.skipped} skipped.`;
+            if (r.processed) msg += ` ${r.processed} processed.`;
+            if (r.message) msg += ` ${r.message}`;
+            if (r.errors && r.errors.length) msg += ` (${r.errors.length} errors)`;
+            resultDiv.textContent = msg;
+            document.getElementById("fetch-engie-otp-form").hidden = true;
+          } else if (event.type === "error") {
+            resultDiv.className = "fetch-result fetch-result-error";
+            resultDiv.textContent = event.error;
+          }
+        }
+      }
+    } catch (err) {
+      resultDiv.className = "fetch-result fetch-result-error";
+      resultDiv.textContent = `Network error: ${err.message}`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "📥 Validate & Fetch";
     }
   });
 }

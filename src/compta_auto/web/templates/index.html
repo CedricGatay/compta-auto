@@ -587,6 +587,33 @@
           </form>
           <div id="fetch-freebox-result" class="fetch-result" hidden></div>
         </section>
+
+        <section class="fetch-section">
+          <h3>⚡ Engie Pro</h3>
+          <p class="fetch-description">
+            Download Engie Pro invoices. Requires a security code sent by email after login.
+          </p>
+          <form id="fetch-engie-login-form" class="fetch-form">
+            <div class="fetch-input-row">
+              <span class="cred-saved-badge" id="engie-saved-badge" hidden>🔑 Saved</span>
+              <input type="email" name="email" id="engie-email" placeholder="Email" autocomplete="off" style="max-width:200px">
+              <input type="password" name="password" id="engie-password" placeholder="Mot de passe" autocomplete="off">
+              <button type="submit" class="btn btn-primary" id="fetch-engie-login-btn">🔐 Login</button>
+              <button type="button" class="btn btn-sm btn-link cred-edit-btn" id="engie-edit-btn" hidden>✏️</button>
+            </div>
+          </form>
+          <form id="fetch-engie-otp-form" class="fetch-form" hidden>
+            <div class="fetch-input-row">
+              <input type="text" name="otp_code" id="engie-otp-code" placeholder="6-digit code" maxlength="6" pattern="[0-9]{6}" style="max-width:120px" autocomplete="one-time-code">
+              <button type="submit" class="btn btn-primary" id="fetch-engie-otp-btn">📥 Validate &amp; Fetch</button>
+              <input type="hidden" id="engie-session-cookies">
+              <input type="hidden" id="engie-factor-id">
+              <input type="hidden" id="engie-user-id">
+              <input type="hidden" id="engie-form-build-id">
+            </div>
+          </form>
+          <div id="fetch-engie-result" class="fetch-result" hidden></div>
+        </section>
       </div>
       <div class="tab-panel" id="panel-export" role="tabpanel">
         {% set export_docs = documents|selectattr("status", "equalto", "doc_included")|list %}

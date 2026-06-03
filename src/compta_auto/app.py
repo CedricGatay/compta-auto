@@ -135,7 +135,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # --- Credentials management ---
 
-    CREDENTIAL_KEYS = ("spotify_sp_dc", "chatgpt_bearer", "free_username", "free_password", "freebox_username", "freebox_password", "orange_username", "orange_password", "sosh_username", "sosh_password")
+    CREDENTIAL_KEYS = ("spotify_sp_dc", "chatgpt_bearer", "free_username", "free_password", "freebox_username", "freebox_password", "engie_email", "engie_password", "orange_username", "orange_password", "sosh_username", "sosh_password")
 
     @app.get("/api/credentials")
     def api_get_credentials(repo: Repository = Depends(get_repo)):
@@ -413,6 +413,77 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             try:
                 result = {"total": 0, "downloaded": 0, "skipped": 0, "errors": []}
                 for event in fetch_freebox_invoices_stream(effective_user, effective_pass, app_settings.raw_dir):
+                    if event["type"] in ("progress", "status"):
+                        yield f"data: {json.dumps(event)}\n\n"
+                    elif event["type"] == "done":
+                        result = event["result"]
+                    elif event["type"] == "error":
+                        yield f"data: {json.dumps(event)}\n\n"
+                        return
+                if result.get("downloaded", 0) > 0:
+                    yield f"data: {json.dumps({'type': 'status', 'message': 'Processing documents…'})}\n\n"
+                    pipeline = AccountingPipeline(app_settings, repo)
+                    scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730)
+                    result["processed"] = scan_summary.renamed + scan_summary.rename_review_needed
+                yield f"data: {json.dumps({'type': 'complete', 'result': result})}\n\n"
+            except AuthError as exc:
+                yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+            except Exception as exc:
+                yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    @app.post("/api/engie-login")
+    def api_engie_login(
+        email: str = Form(""),
+        password: str = Form(""),
+        repo: Repository = Depends(get_repo),
+    ):
+        """Step 1: Login to Engie Pro (triggers MFA code via email)."""
+        from .engie_invoices import login, AuthError
+
+        effective_email = _get_cred(repo, "engie_email", email)
+        effective_pass = _get_cred(repo, "engie_password", password)
+        if not effective_email or not effective_pass:
+            return JSONResponse(status_code=400, content={"error": "No credentials provided or saved."})
+
+        try:
+            session_cookies, factor_id, user_id, form_build_id = login(effective_email, effective_pass)
+            repo.set_app_state("cred_engie_email", effective_email)
+            repo.set_app_state("cred_engie_password", effective_pass)
+            if not factor_id:
+                # No MFA needed (device trusted)
+                return {"status": "authenticated", "session_cookies": session_cookies}
+            return {
+                "status": "otp_required",
+                "session_cookies": session_cookies,
+                "factor_id": factor_id,
+                "user_id": user_id,
+                "form_build_id": form_build_id,
+            }
+        except AuthError as exc:
+            return JSONResponse(status_code=401, content={"error": str(exc)})
+        except Exception as exc:
+            return JSONResponse(status_code=500, content={"error": str(exc)})
+
+    @app.post("/api/engie-otp")
+    def api_engie_otp(
+        session_cookies: str = Form(...),
+        factor_id: str = Form(...),
+        user_id: str = Form(...),
+        form_build_id: str = Form(...),
+        otp_code: str = Form(...),
+        repo: Repository = Depends(get_repo),
+    ) -> StreamingResponse:
+        """Step 2: Validate OTP and download Engie Pro invoices."""
+        from .engie_invoices import fetch_engie_invoices_stream, AuthError
+
+        def event_stream():
+            try:
+                result = {"total": 0, "downloaded": 0, "skipped": 0, "errors": []}
+                for event in fetch_engie_invoices_stream(
+                    session_cookies, factor_id, user_id, form_build_id, otp_code, app_settings.raw_dir
+                ):
                     if event["type"] in ("progress", "status"):
                         yield f"data: {json.dumps(event)}\n\n"
                     elif event["type"] == "done":
