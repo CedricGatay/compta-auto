@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
@@ -13,6 +14,7 @@ from .config import Settings, get_settings
 from .db import Database
 from .mail_to_pdf import mail_to_pdf
 from .pipeline import AccountingPipeline, RunSummary
+from .models import DOCUMENT_EXTENSIONS
 from .normalize import email_domain
 from .renamer import rename_document_as
 from .repositories import Repository
@@ -42,6 +44,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def index(request: Request, repo: Repository = Depends(get_repo)) -> HTMLResponse:
         last_scan_folder = repo.get_app_state("last_scan_folder") or app_settings.scan_folder or ""
         last_scan_folder_date = repo.get_app_state("last_scan_folder_date") or ""
+        last_fetch = {
+            provider: repo.get_app_state(f"last_fetch_{provider}") or ""
+            for provider in ("spotify", "openai", "free_mobile", "orange", "sosh", "freebox", "ovh", "engie")
+        }
         return templates.TemplateResponse(
             request,
             "index.html",
@@ -54,30 +60,63 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "settings": app_settings,
                 "last_scan_folder": last_scan_folder,
                 "last_scan_folder_date": last_scan_folder_date,
+                "last_fetch": last_fetch,
+                "provider_hint_counts": repo.count_provider_hints(),
+                "missing_providers": repo.list_missing_providers(),
             },
         )
 
     @app.post("/scan")
-    def scan(months: int = Form(1), repo: Repository = Depends(get_repo)) -> RedirectResponse:
-        pipeline = AccountingPipeline(app_settings, repo)
-        pipeline.run_mail_scan(months=months)
-        return RedirectResponse("/", status_code=303)
+    def scan(months: int = Form(1)) -> StreamingResponse:
+        """Scan mail with SSE progress updates."""
+        def event_stream():
+            conn = db.connect()
+            try:
+                repo = Repository(conn)
+                pipeline = AccountingPipeline(app_settings, repo)
+                summary = RunSummary()
+                run_id = repo.create_run()
+                yield f"data: {json.dumps({'type': 'status', 'message': 'Searching emails…'})}\n\n"
+                try:
+                    message_ids = pipeline.spark.search_candidate_ids(months)
+                    total = len(message_ids)
+                    yield f"data: {json.dumps({'type': 'start', 'total': total})}\n\n"
+                    for i, message_id in enumerate(message_ids):
+                        for message in pipeline.spark.read_thread(message_id, download_attachments=True):
+                            summary.scanned_messages += 1
+                            pipeline.process_message(message, summary)
+                        yield f"data: {json.dumps({'type': 'progress', 'current': i + 1, 'total': total, 'new': summary.new_mails, 'triage': summary.triage_mails})}\n\n"
+                    repo.finish_run(run_id, "finished", summary.as_dict())
+                    conn.commit()
+                    yield f"data: {json.dumps({'type': 'complete', 'result': summary.as_dict()})}\n\n"
+                except Exception as exc:
+                    summary.failures.append(str(exc))
+                    repo.finish_run(run_id, "failed", summary.as_dict())
+                    conn.commit()
+                    yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+            finally:
+                conn.close()
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
 
     @app.post("/scan-folder")
     def scan_folder(
         folder: str = Form(...),
         timespan: str = Form("30"),
-        repo: Repository = Depends(get_repo),
-    ) -> RedirectResponse:
+    ) -> StreamingResponse:
+        """Scan folder with SSE progress updates."""
         from datetime import datetime, timezone
 
         folder_path = Path(folder).expanduser().resolve()
         if not folder_path.is_dir():
             raise HTTPException(status_code=400, detail=f"Folder not found: {folder}")
 
-        # Compute max_age_days
+        # Compute max_age_days before entering the generator
         if timespan == "since_last":
-            last_date_str = repo.get_app_state("last_scan_folder_date")
+            conn_pre = db.connect()
+            repo_pre = Repository(conn_pre)
+            last_date_str = repo_pre.get_app_state("last_scan_folder_date")
+            conn_pre.close()
             if last_date_str:
                 last_dt = datetime.fromisoformat(last_date_str)
                 delta = datetime.now(timezone.utc) - last_dt
@@ -87,12 +126,43 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         else:
             max_age_days = int(timespan)
 
-        pipeline = AccountingPipeline(app_settings, repo)
-        pipeline.run_folder_scan(folder_path, max_age_days=max_age_days)
-        # Persist folder path and scan timestamp
-        repo.set_app_state("last_scan_folder", str(folder_path))
-        repo.set_app_state("last_scan_folder_date", datetime.now(timezone.utc).isoformat())
-        return RedirectResponse("/", status_code=303)
+        def event_stream():
+            conn = db.connect()
+            try:
+                repo = Repository(conn)
+                pipeline = AccountingPipeline(app_settings, repo)
+                summary = RunSummary()
+                run_id = repo.create_run()
+                yield f"data: {json.dumps({'type': 'status', 'message': 'Scanning folder…'})}\n\n"
+                try:
+                    import time
+                    cutoff = time.time() - (max_age_days * 86400)
+                    files = [
+                        f for f in sorted(folder_path.iterdir())
+                        if f.is_file() and f.suffix.lower() in DOCUMENT_EXTENSIONS
+                        and f.stat().st_mtime >= cutoff
+                    ]
+                    total = len(files)
+                    yield f"data: {json.dumps({'type': 'start', 'total': total})}\n\n"
+                    for i, file_path in enumerate(files):
+                        summary.scanned_messages += 1
+                        pipeline._process_local_file(file_path, summary)
+                        if (i + 1) % 3 == 0 or i == total - 1:
+                            yield f"data: {json.dumps({'type': 'progress', 'current': i + 1, 'total': total, 'renamed': summary.renamed, 'review': summary.rename_review_needed})}\n\n"
+                    repo.finish_run(run_id, "finished", summary.as_dict())
+                    repo.set_app_state("last_scan_folder", str(folder_path))
+                    repo.set_app_state("last_scan_folder_date", datetime.now(timezone.utc).isoformat())
+                    conn.commit()
+                    yield f"data: {json.dumps({'type': 'complete', 'result': summary.as_dict()})}\n\n"
+                except Exception as exc:
+                    summary.failures.append(str(exc))
+                    repo.finish_run(run_id, "failed", summary.as_dict())
+                    conn.commit()
+                    yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+            finally:
+                conn.close()
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
 
     @app.get("/api/pick-folder")
     def pick_folder() -> JSONResponse:
@@ -133,9 +203,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app_settings.raw_dir.mkdir(parents=True, exist_ok=True)
         return RedirectResponse("/", status_code=303)
 
+    @app.post("/purge")
+    def purge(repo: Repository = Depends(get_repo)) -> RedirectResponse:
+        """Purge ALL data (rules, documents, mails, etc.) except stored credentials."""
+        import shutil
+
+        repo.purge_all()
+        # Remove renamed files on disk
+        if app_settings.renamed_dir.exists():
+            shutil.rmtree(app_settings.renamed_dir)
+            app_settings.renamed_dir.mkdir(parents=True, exist_ok=True)
+        # Remove raw downloads
+        if app_settings.raw_dir.exists():
+            shutil.rmtree(app_settings.raw_dir)
+            app_settings.raw_dir.mkdir(parents=True, exist_ok=True)
+        return RedirectResponse("/", status_code=303)
+
     # --- Credentials management ---
 
-    CREDENTIAL_KEYS = ("spotify_sp_dc", "chatgpt_bearer", "free_username", "free_password", "freebox_username", "freebox_password", "engie_email", "engie_password", "orange_username", "orange_password", "sosh_username", "sosh_password")
+    CREDENTIAL_KEYS = ("spotify_sp_dc", "chatgpt_bearer", "free_username", "free_password", "freebox_username", "freebox_password", "engie_email", "engie_password", "orange_username", "orange_password", "sosh_username", "sosh_password", "ovh_app_key", "ovh_app_secret", "ovh_consumer_key")
 
     @app.get("/api/credentials")
     def api_get_credentials(repo: Repository = Depends(get_repo)):
@@ -202,7 +288,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 # Process through pipeline
                 yield f"data: {json.dumps({'type': 'status', 'message': 'Processing documents…'})}\n\n"
                 pipeline = AccountingPipeline(app_settings, repo)
-                scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730)
+                scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730, known_vendor="spotify")
+                repo.set_app_state("last_fetch_spotify", datetime.now().isoformat(timespec="minutes"))
                 result["processed"] = scan_summary.renamed + scan_summary.rename_review_needed
                 yield f"data: {json.dumps({'type': 'complete', 'result': result})}\n\n"
             except SystemExit:
@@ -236,7 +323,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 # Process through pipeline
                 yield f"data: {json.dumps({'type': 'status', 'message': 'Processing documents…'})}\n\n"
                 pipeline = AccountingPipeline(app_settings, repo)
-                scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730)
+                scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730, known_vendor="openai")
+                repo.set_app_state("last_fetch_openai", datetime.now().isoformat(timespec="minutes"))
                 result["processed"] = scan_summary.renamed + scan_summary.rename_review_needed
                 yield f"data: {json.dumps({'type': 'complete', 'result': result})}\n\n"
             except AuthError as exc:
@@ -299,7 +387,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if result.get("downloaded", 0) > 0:
                     yield f"data: {json.dumps({'type': 'status', 'message': 'Processing documents…'})}\n\n"
                     pipeline = AccountingPipeline(app_settings, repo)
-                    scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730)
+                    scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730, known_vendor="free_mobile")
+                    repo.set_app_state("last_fetch_free_mobile", datetime.now().isoformat(timespec="minutes"))
                     result["processed"] = scan_summary.renamed + scan_summary.rename_review_needed
                 yield f"data: {json.dumps({'type': 'complete', 'result': result})}\n\n"
             except AuthError as exc:
@@ -341,7 +430,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if result.get("downloaded", 0) > 0:
                     yield f"data: {json.dumps({'type': 'status', 'message': 'Processing documents…'})}\n\n"
                     pipeline = AccountingPipeline(app_settings, repo)
-                    scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730)
+                    scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730, known_vendor="orange")
+                    repo.set_app_state("last_fetch_orange", datetime.now().isoformat(timespec="minutes"))
                     result["processed"] = scan_summary.renamed + scan_summary.rename_review_needed
                 yield f"data: {json.dumps({'type': 'complete', 'result': result})}\n\n"
             except AuthError as exc:
@@ -382,7 +472,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if result.get("downloaded", 0) > 0:
                     yield f"data: {json.dumps({'type': 'status', 'message': 'Processing documents…'})}\n\n"
                     pipeline = AccountingPipeline(app_settings, repo)
-                    scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730)
+                    scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730, known_vendor="sosh")
+                    repo.set_app_state("last_fetch_sosh", datetime.now().isoformat(timespec="minutes"))
                     result["processed"] = scan_summary.renamed + scan_summary.rename_review_needed
                 yield f"data: {json.dumps({'type': 'complete', 'result': result})}\n\n"
             except AuthError as exc:
@@ -423,7 +514,53 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if result.get("downloaded", 0) > 0:
                     yield f"data: {json.dumps({'type': 'status', 'message': 'Processing documents…'})}\n\n"
                     pipeline = AccountingPipeline(app_settings, repo)
-                    scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730)
+                    scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730, known_vendor="freebox")
+                    repo.set_app_state("last_fetch_freebox", datetime.now().isoformat(timespec="minutes"))
+                    result["processed"] = scan_summary.renamed + scan_summary.rename_review_needed
+                yield f"data: {json.dumps({'type': 'complete', 'result': result})}\n\n"
+            except AuthError as exc:
+                yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+            except Exception as exc:
+                yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    @app.post("/api/ovh-fetch")
+    def api_ovh_fetch(
+        app_key: str = Form(""),
+        app_secret: str = Form(""),
+        consumer_key: str = Form(""),
+        repo: Repository = Depends(get_repo),
+    ) -> StreamingResponse:
+        """Fetch all OVH invoices via the official API."""
+        from .ovh_invoices import fetch_ovh_invoices_stream, AuthError
+
+        effective_key = _get_cred(repo, "ovh_app_key", app_key)
+        effective_secret = _get_cred(repo, "ovh_app_secret", app_secret)
+        effective_ck = _get_cred(repo, "ovh_consumer_key", consumer_key)
+        if not effective_key or not effective_secret or not effective_ck:
+            return JSONResponse(status_code=400, content={"error": "OVH API credentials required (app key, app secret, consumer key)."})
+
+        repo.set_app_state("cred_ovh_app_key", effective_key)
+        repo.set_app_state("cred_ovh_app_secret", effective_secret)
+        repo.set_app_state("cred_ovh_consumer_key", effective_ck)
+
+        def event_stream():
+            try:
+                result = {"total": 0, "downloaded": 0, "skipped": 0, "errors": []}
+                for event in fetch_ovh_invoices_stream(effective_key, effective_secret, effective_ck, app_settings.raw_dir):
+                    if event["type"] in ("progress", "status"):
+                        yield f"data: {json.dumps(event)}\n\n"
+                    elif event["type"] == "done":
+                        result = event["result"]
+                    elif event["type"] == "error":
+                        yield f"data: {json.dumps(event)}\n\n"
+                        return
+                if result.get("downloaded", 0) > 0:
+                    yield f"data: {json.dumps({'type': 'status', 'message': 'Processing documents…'})}\n\n"
+                    pipeline = AccountingPipeline(app_settings, repo)
+                    scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730, known_vendor="ovh")
+                    repo.set_app_state("last_fetch_ovh", datetime.now().isoformat(timespec="minutes"))
                     result["processed"] = scan_summary.renamed + scan_summary.rename_review_needed
                 yield f"data: {json.dumps({'type': 'complete', 'result': result})}\n\n"
             except AuthError as exc:
@@ -494,7 +631,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if result.get("downloaded", 0) > 0:
                     yield f"data: {json.dumps({'type': 'status', 'message': 'Processing documents…'})}\n\n"
                     pipeline = AccountingPipeline(app_settings, repo)
-                    scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730)
+                    scan_summary = pipeline.run_folder_scan(app_settings.raw_dir, max_age_days=730, known_vendor="engie")
+                    repo.set_app_state("last_fetch_engie", datetime.now().isoformat(timespec="minutes"))
                     result["processed"] = scan_summary.renamed + scan_summary.rename_review_needed
                 yield f"data: {json.dumps({'type': 'complete', 'result': result})}\n\n"
             except AuthError as exc:
@@ -574,7 +712,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             body=mail.get("body", "") or "",
             output_path=tmp,
         )
-        return FileResponse(tmp, media_type="application/pdf", filename="preview.pdf")
+        return FileResponse(
+            tmp, media_type="application/pdf",
+            headers={"Content-Disposition": "inline"},
+        )
 
     @app.post("/mails/{mail_id}/to-pdf")
     def mail_to_pdf_route(
@@ -619,6 +760,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         repo.add_provider_task(provider, url, None, "provider_manual_link", notes)
         return RedirectResponse("/", status_code=303)
 
+    @app.post("/api/dismiss-provider-suggestion")
+    def dismiss_provider_suggestion(
+        vendor: str = Form(...),
+        repo: Repository = Depends(get_repo),
+    ) -> JSONResponse:
+        repo.dismiss_provider_suggestion(vendor)
+        return JSONResponse({"ok": True})
+
     @app.post("/documents/{document_id}/rename")
     def rename_document_route(
         document_id: int,
@@ -635,6 +784,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         final_filename, final_path = rename_document_as(source, vendor, date, app_settings.renamed_dir)
         repo.update_document_metadata(document_id, vendor, date, 1.0, "manual", "rename_needed")
         repo.mark_document_renamed(document_id, final_filename, str(final_path))
+        return RedirectResponse("/", status_code=303)
+
+    @app.post("/documents/{document_id}/keep")
+    def keep_document_route(
+        document_id: int,
+        repo: Repository = Depends(get_repo),
+    ) -> RedirectResponse:
+        """Keep the document with its current original filename (copy to renamed dir)."""
+        document = repo.get_document(document_id)
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        source = Path(document["raw_path"])
+        if not source.exists():
+            raise HTTPException(status_code=404, detail="Source file not found")
+        import shutil
+        from .files import unique_path
+        app_settings.renamed_dir.mkdir(parents=True, exist_ok=True)
+        target = unique_path(app_settings.renamed_dir / source.name)
+        shutil.copy2(source, target)
+        repo.update_document_metadata(document_id, document.get("detected_vendor"), document.get("detected_date"), 1.0, "manual", "rename_needed")
+        repo.mark_document_renamed(document_id, target.name, str(target))
         return RedirectResponse("/", status_code=303)
 
     @app.post("/documents/{document_id}/ignore")
@@ -674,6 +844,123 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for doc_id in doc_ids:
             repo.update_document_status(doc_id, status)
         return JSONResponse({"ok": True, "count": len(doc_ids)})
+
+    @app.post("/documents/bulk-accept-suggested")
+    async def bulk_accept_suggested(
+        request: Request,
+        repo: Repository = Depends(get_repo),
+    ) -> JSONResponse:
+        """Bulk accept suggested names for multiple documents."""
+        body = await request.json()
+        doc_ids: list[int] = body.get("ids", [])
+        if not doc_ids:
+            raise HTTPException(status_code=400, detail="ids required")
+        accepted = 0
+        for doc_id in doc_ids:
+            document = repo.get_document(doc_id)
+            if not document:
+                continue
+            # Derive vendor/date from final_filename
+            final_fn = document.get("final_filename") or ""
+            import re as _re
+            m = _re.match(r"(\d{4})_(\d{2})_(\d{2})_(.+)\.\w+$", final_fn)
+            if m:
+                d = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+                v = m.group(4)
+            elif document.get("detected_vendor") and document.get("detected_date"):
+                v = document["detected_vendor"]
+                d = document["detected_date"]
+            else:
+                continue
+            source = Path(document["raw_path"])
+            if not source.exists():
+                continue
+            final_filename, final_path = rename_document_as(source, v, d, app_settings.renamed_dir)
+            repo.update_document_metadata(doc_id, v, d, 1.0, "manual", "rename_needed")
+            repo.mark_document_renamed(doc_id, final_filename, str(final_path))
+            accepted += 1
+        return JSONResponse({"ok": True, "count": accepted})
+
+    @app.post("/documents/re-rename")
+    async def re_rename_documents(
+        repo: Repository = Depends(get_repo),
+    ) -> StreamingResponse:
+        """Re-run rename logic on all non-manually-renamed documents, streaming progress."""
+        from .extraction import MetadataExtractor, find_date, ExtractedMetadata
+        from .renamer import rename_document
+
+        # Known vendor prefixes from fetchers
+        FETCHER_PREFIXES = {
+            "spotify": "spotify",
+            "openai": "openai",
+            "free_mobile": "free_mobile",
+            "orange": "orange",
+            "sosh": "sosh",
+            "freebox": "freebox",
+            "ovh": "ovh",
+            "engie_pro": "engie",
+            "engie": "engie",
+        }
+
+        def _detect_fetcher_vendor(filename: str) -> str | None:
+            """If the filename matches a known fetcher prefix, return the vendor."""
+            lower = filename.lower()
+            for prefix, vendor in sorted(FETCHER_PREFIXES.items(), key=lambda x: -len(x[0])):
+                if lower.startswith(prefix + "_") or lower.startswith(prefix + "."):
+                    return vendor
+            return None
+
+        def event_stream():
+            extractor = MetadataExtractor()
+            docs = repo.list_documents("renamed") + repo.list_documents("rename_review_needed")
+            # Filter to only processable docs
+            processable = [
+                d for d in docs
+                if d.get("extraction_method") != "manual" and Path(d["raw_path"]).exists()
+            ]
+            total = len(processable)
+            yield f"data: {json.dumps({'type': 'start', 'total': total})}\n\n"
+            updated = 0
+            for i, doc in enumerate(processable):
+                raw_path = Path(doc["raw_path"])
+                known_vendor = _detect_fetcher_vendor(doc.get("original_filename", raw_path.name))
+                if known_vendor:
+                    # Use filename-first date extraction for fetcher files
+                    detected_date = find_date(raw_path.name)
+                    if not detected_date:
+                        detected_date = extractor.extract_date_only(raw_path)
+                    if not detected_date:
+                        text = extractor._read_text(raw_path)
+                        detected_date = find_date(text[:5000])
+                    metadata = ExtractedMetadata(
+                        vendor=known_vendor, date=detected_date,
+                        confidence=1.0 if detected_date else 0.9,
+                        method="fetcher",
+                    )
+                else:
+                    metadata = extractor.extract(raw_path)
+                result = rename_document(
+                    raw_path, metadata, app_settings.renamed_dir, app_settings.min_rename_confidence
+                )
+                if result:
+                    # Remove old renamed file if it exists
+                    old_final = doc.get("final_path")
+                    if old_final:
+                        old_path = Path(old_final)
+                        if old_path.exists():
+                            old_path.unlink()
+                    final_filename, final_path = result
+                    repo.update_document_metadata(
+                        doc["id"], metadata.vendor, metadata.date,
+                        metadata.confidence, metadata.method, "rename_needed",
+                    )
+                    repo.mark_document_renamed(doc["id"], final_filename, str(final_path))
+                    updated += 1
+                # If extraction fails, keep existing status — don't demote
+                yield f"data: {json.dumps({'type': 'progress', 'current': i + 1, 'total': total, 'filename': raw_path.name})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'updated': updated})}\n\n"
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
 
     @app.post("/documents/bulk-delete")
     async def bulk_delete_documents(

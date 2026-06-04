@@ -6,9 +6,9 @@ from compta_auto.renamer import rename_document
 
 
 def test_normalize_vendor_for_filename() -> None:
-    assert normalize_vendor("OpenAI, LLC") == "openai_llc"
+    assert normalize_vendor("OpenAI, LLC") == "openai"
     assert normalize_vendor("Spotify & Co") == "spotify_and_co"
-    assert safe_filename_stem("2026-05-29", "OpenAI, LLC") == "2026_05_29_openai_llc"
+    assert safe_filename_stem("2026-05-29", "OpenAI, LLC") == "2026_05_29_openai"
 
 
 def test_normalize_url_removes_tracking_params() -> None:

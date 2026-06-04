@@ -118,8 +118,35 @@ def test_mail_without_attachment_displays_download_link(tmp_path: Path) -> None:
 
 def test_saved_sender_rule_auto_processes_future_mail(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
+    # Mail WITH an invoice link should be auto-selected
     message = MailMessage(
         spark_message_id="102",
+        sender="billing@spotify.com",
+        recipients=["me@example.com"],
+        subject="Your invoice",
+        sent_at=None,
+        body="Download your invoice: https://spotify.com/invoices/123/download",
+    )
+    repo = make_repo(settings)
+
+    try:
+        repo.add_rule("always_process", "sender", "billing@spotify.com", "Spotify")
+        summary = RunSummary()
+        AccountingPipeline(settings, repo, spark=FakeSpark([message])).process_message(message, summary)
+        repo.conn.commit()
+
+        mails = repo.list_mails()
+        assert mails[0]["status"] == "mail_auto_selected"
+        assert mails[0]["detected_vendor"] == "spotify"
+    finally:
+        repo.conn.close()
+
+
+def test_always_process_rule_without_attachment_goes_to_provider_hint(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    # Mail WITHOUT attachments from known provider → provider hint (badge on fetch)
+    message = MailMessage(
+        spark_message_id="103",
         sender="billing@spotify.com",
         recipients=["me@example.com"],
         subject="Your invoice",
@@ -134,7 +161,7 @@ def test_saved_sender_rule_auto_processes_future_mail(tmp_path: Path) -> None:
         repo.conn.commit()
 
         mails = repo.list_mails()
-        assert mails[0]["status"] == "mail_auto_selected"
+        assert mails[0]["status"] == "mail_provider_hint"
         assert mails[0]["detected_vendor"] == "spotify"
     finally:
         repo.conn.close()

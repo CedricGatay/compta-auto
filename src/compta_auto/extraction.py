@@ -16,6 +16,23 @@ DATE_PATTERNS = (
     re.compile(r"(?<!\d)(0?[1-9]|[12]\d|3[01])[-_/\.](0?[1-9]|1[0-2])[-_/\.](20\d{2})(?!\d)"),
 )
 
+MONTH_NAMES = {
+    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+    "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    "janvier": 1, "février": 2, "fevrier": 2, "mars": 3, "avril": 4, "mai": 5, "juin": 6,
+    "juillet": 7, "août": 8, "aout": 8, "septembre": 9, "octobre": 10, "novembre": 11, "décembre": 12, "decembre": 12,
+}
+
+# "May 29, 2026" or "29 May 2026" or "29 mai 2026"
+_MONTH_NAME_RE = re.compile(
+    r"(?:(\d{1,2})\s+)?("
+    + "|".join(sorted(MONTH_NAMES.keys(), key=len, reverse=True))
+    + r")\.?\s+(\d{1,2})?,?\s*(20\d{2})",
+    re.IGNORECASE,
+)
+
 OPENAI_EXTRACTION_PROMPT = """\
 You are an invoice metadata extractor. Analyze the provided document and extract:
 - vendor: If VENDOR_NAME is provided, you MUST use it exactly as the vendor value. Do not use any other name from the document.
@@ -24,6 +41,20 @@ You are an invoice metadata extractor. Analyze the provided document and extract
 
 Respond ONLY with valid JSON: {"vendor": "...", "date": "YYYY-MM-DD", "confidence": 0.XX}
 If you cannot determine a field, set it to null but still provide your confidence estimate.
+"""
+
+OPENAI_DATE_EXTRACTION_PROMPT = """\
+You are an invoice date extractor. Find the invoice date from the document text.
+Look specifically for patterns like:
+- "votre facture du", "facture du", "date de facture", "date de la facture"
+- "invoice date", "date of invoice", "billed on", "billing date"
+- Any date clearly associated with when the invoice was issued
+
+Do NOT use: due dates, payment deadlines, billing period start/end dates, next invoice dates.
+The invoice date is when the document was issued.
+
+Respond ONLY with valid JSON: {"date": "YYYY-MM-DD"}
+If you cannot determine the date, respond: {"date": null}
 """
 
 
@@ -62,6 +93,53 @@ class MetadataExtractor:
                 pass
         # Fallback to heuristic only if no LLM available or LLM failed
         return heuristic_extract(path, text, mail_subject, sender)
+
+    def extract_date_only(self, path: Path) -> str | None:
+        """Extract only the invoice date using LLM, with targeted prompt."""
+        text = self._read_text(path)
+        if not text.strip():
+            return None
+        if self.openai_api_key:
+            return self._openai_extract_date(text)
+        if self._apple_available:
+            return self._apple_extract_date(path, text)
+        return None
+
+    def _openai_extract_date(self, text: str) -> str | None:
+        try:
+            from openai import OpenAI
+        except ImportError:
+            return None
+        client = OpenAI(api_key=self.openai_api_key)
+        messages: list[dict] = [
+            {"role": "system", "content": OPENAI_DATE_EXTRACTION_PROMPT},
+            {"role": "user", "content": f"Document text:\n{text[:4000]}"},
+        ]
+        try:
+            response = client.chat.completions.create(
+                model=self.openai_model,
+                messages=messages,
+                temperature=0.0,
+                max_tokens=50,
+            )
+            raw = response.choices[0].message.content or ""
+            json_match = re.search(r"\{[^}]+\}", raw)
+            if not json_match:
+                return None
+            payload = json.loads(json_match.group(0))
+            return payload.get("date")
+        except Exception:
+            return None
+
+    def _apple_extract_date(self, path: Path, text: str) -> str | None:
+        """Use Apple FoundationModels for date-only extraction."""
+        args = [str(APPLE_EXTRACTOR_PATH), str(path), f"EXTRACT_DATE_ONLY: {OPENAI_DATE_EXTRACTION_PROMPT}"]
+        try:
+            result = subprocess.run(args, check=True, capture_output=True, text=True, timeout=30)
+            payload = json.loads(result.stdout)
+            return payload.get("date")
+        except Exception:
+            return None
 
     def _read_text(self, path: Path) -> str:
         if path.suffix.lower() == ".pdf":
@@ -264,6 +342,26 @@ def find_date(value: str) -> str | None:
                 return date(year, month, day).isoformat()
             except ValueError:
                 continue
+    # Try month name patterns ("May 29, 2026" or "29 May 2026")
+    for m in _MONTH_NAME_RE.finditer(value):
+        day_before, month_name, day_after, year_str = m.groups()
+        month_num = MONTH_NAMES.get(month_name.lower())
+        if not month_num:
+            continue
+        day_str = day_before or day_after
+        day_num = int(day_str) if day_str else 1
+        try:
+            return date(int(year_str), month_num, day_num).isoformat()
+        except ValueError:
+            continue
+    # Fallback: YYYY-MM without day (use 1st of month)
+    ym_match = re.search(r"(?<!\d)(20\d{2})[-_/\.](1[0-2]|0?[1-9])(?=[-_/\.\s]|$)", value)
+    if ym_match:
+        year, month = int(ym_match.group(1)), int(ym_match.group(2))
+        try:
+            return date(year, month, 1).isoformat()
+        except ValueError:
+            pass
     return None
 
 
@@ -291,5 +389,16 @@ def vendor_from_sender(sender: str) -> str | None:
 
 def vendor_from_filename(path: Path) -> str | None:
     stem = re.sub(r"20\d{2}[-_.]\d{1,2}[-_.]\d{1,2}", "", path.stem)
-    stem = re.sub(r"\b(invoice|facture|receipt|recu|reçu)\b", "", stem, flags=re.IGNORECASE)
+    # Also strip YYYY_MM patterns (no day)
+    stem = re.sub(r"20\d{2}[-_.](1[0-2]|0?[1-9])(?=[-_.\s]|$)", "", stem)
+    stem = re.sub(r"(?:^|[-_.\s])(invoice|facture|receipt|recu|reçu)(?=[-_.\s]|$)", "", stem, flags=re.IGNORECASE)
+    # Strip French/English month names
+    months = r"(?:^|[-_.\s])(janvier|f[eé]vrier|mars|avril|mai|juin|juillet|ao[uû]t|septembre|octobre|novembre|d[eé]cembre|january|february|march|april|may|june|july|august|september|october|november|december)(?=[-_.\s]|$)"
+    stem = re.sub(months, "", stem, flags=re.IGNORECASE)
+    # Strip standalone year (e.g. trailing _2026)
+    stem = re.sub(r"[-_.]20\d{2}(?=[-_.\s]|$)", "", stem)
+    # Strip alphanumeric reference codes (e.g. FR72332983)
+    stem = re.sub(r"[A-Z]{1,3}\d{6,}", "", stem)
+    # Strip long standalone numbers (10+ digits, likely IDs not vendor names)
+    stem = re.sub(r"\d{10,}", "", stem)
     return normalize_vendor(stem)

@@ -60,6 +60,218 @@ document.querySelectorAll(".tab-panel").forEach((panel) => {
   }
 });
 
+// === Wizard layout ===
+const VIEW_MODE_KEY = "compta-view-mode";
+const WIZARD_STEP_KEY = "compta-wizard-step";
+const WIZARD_MONTH_KEY = "compta-wizard-month";
+const WIZARD_STEP_TO_TAB = {
+  fetch: "fetch",
+  triage: "triage",
+  rename: "documents",
+  export: "export",
+};
+
+const viewModeButtons = document.querySelectorAll("[data-view-mode]");
+const wizardShell = document.getElementById("wizard-shell");
+const wizardStepButtons = document.querySelectorAll(".wizard-step");
+const wizardPanels = document.querySelectorAll(".wizard-panel");
+const wizardMonthInput = document.getElementById("wizard-month-input");
+const wizardMonthDisplay = document.getElementById("wizard-month-display");
+const wizardMonthHint = document.getElementById("wizard-month-hint");
+const wizardMailContext = document.getElementById("wizard-mail-context");
+const wizardStatusMail = document.getElementById("wizard-status-mail");
+const scanMailForm = document.getElementById("scan-mail-form");
+const scanMailMonthsInput = scanMailForm?.querySelector('input[name="months"]');
+
+const headerHomes = {
+  "scan-mail": document.querySelector('[data-header-home="scan-mail"]'),
+  "scan-folder": document.querySelector('[data-header-home="scan-folder"]'),
+};
+
+const panelHomes = {
+  triage: document.querySelector('[data-panel-home="triage"]'),
+  documents: document.querySelector('[data-panel-home="documents"]'),
+  fetch: document.querySelector('[data-panel-home="fetch"]'),
+  export: document.querySelector('[data-panel-home="export"]'),
+};
+
+const wizardSlots = {
+  mail: document.querySelector('[data-wizard-slot="mail"]'),
+  fetch: document.querySelector('[data-wizard-slot="fetch"]'),
+  folder: document.querySelector('[data-wizard-slot="folder"]'),
+  triage: document.querySelector('[data-wizard-slot="triage"]'),
+  rename: document.querySelector('[data-wizard-slot="rename"]'),
+  export: document.querySelector('[data-wizard-slot="export"]'),
+};
+
+function moveNode(node, target) {
+  if (!node || !target || node.parentElement === target) return;
+  target.appendChild(node);
+}
+
+function mountWizardContent() {
+  moveNode(document.getElementById("scan-mail-form"), wizardSlots.mail);
+  moveNode(document.getElementById("panel-fetch"), wizardSlots.fetch);
+  moveNode(document.getElementById("scan-folder-form"), wizardSlots.folder);
+  moveNode(document.getElementById("panel-triage"), wizardSlots.triage);
+  moveNode(document.getElementById("panel-documents"), wizardSlots.rename);
+  moveNode(document.getElementById("panel-export"), wizardSlots.export);
+}
+
+function restoreClassicContent() {
+  moveNode(document.getElementById("scan-mail-form"), headerHomes["scan-mail"]);
+  moveNode(document.getElementById("scan-folder-form"), headerHomes["scan-folder"]);
+  moveNode(document.getElementById("panel-fetch"), panelHomes.fetch);
+  moveNode(document.getElementById("panel-triage"), panelHomes.triage);
+  moveNode(document.getElementById("panel-documents"), panelHomes.documents);
+  moveNode(document.getElementById("panel-export"), panelHomes.export);
+}
+
+function getCurrentMonthValue() {
+  const today = new Date();
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function getDefaultWizardMonth() {
+  const date = new Date();
+  date.setDate(1);
+  date.setMonth(date.getMonth() - 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function parseMonthValue(value) {
+  if (!/^\d{4}-\d{2}$/.test(value || "")) return null;
+  const [year, month] = value.split("-").map(Number);
+  return new Date(year, month - 1, 1);
+}
+
+function formatMonthValue(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function formatMonthLabel(value) {
+  const parsed = parseMonthValue(value);
+  if (!parsed) return "—";
+  const label = new Intl.DateTimeFormat("fr-FR", { month: "long", year: "numeric" }).format(parsed);
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function shiftMonth(value, delta) {
+  const parsed = parseMonthValue(value) || parseMonthValue(getDefaultWizardMonth());
+  parsed.setMonth(parsed.getMonth() + delta);
+  return formatMonthValue(parsed);
+}
+
+function calculateMonthsToScan(value) {
+  const target = parseMonthValue(value);
+  if (!target) return 1;
+  const current = parseMonthValue(getCurrentMonthValue());
+  const monthDelta = ((current.getFullYear() - target.getFullYear()) * 12) + (current.getMonth() - target.getMonth());
+  return Math.min(24, Math.max(1, monthDelta + 1));
+}
+
+function updateWizardMonth(value) {
+  if (!wizardMonthInput) return;
+
+  const maxValue = getCurrentMonthValue();
+  const normalized = (() => {
+    if (!parseMonthValue(value)) return getDefaultWizardMonth();
+    return value > maxValue ? maxValue : value;
+  })();
+  const label = formatMonthLabel(normalized);
+  const monthsToScan = calculateMonthsToScan(normalized);
+  const helper = monthsToScan === 1
+    ? `Mail scan uses a 1-month window focused on ${label}.`
+    : `Mail scan uses the last ${monthsToScan} months to fully cover ${label}.`;
+
+  wizardMonthInput.value = normalized;
+  wizardMonthDisplay.textContent = label;
+  wizardMonthHint.textContent = helper;
+  if (wizardMailContext) {
+    wizardMailContext.textContent = `Selected month: ${label} · scan parameter: ${monthsToScan} month${monthsToScan > 1 ? "s" : ""}.`;
+  }
+  if (wizardStatusMail) {
+    wizardStatusMail.textContent = `${label} · ${monthsToScan} month${monthsToScan > 1 ? "s" : ""} window`;
+  }
+  if (scanMailMonthsInput) {
+    scanMailMonthsInput.value = String(monthsToScan);
+    scanMailMonthsInput.title = helper;
+  }
+  document.querySelectorAll("[data-wizard-month-label]").forEach((element) => {
+    element.textContent = label;
+  });
+  sessionStorage.setItem(WIZARD_MONTH_KEY, normalized);
+}
+
+function showWizardStep(stepId) {
+  if (!wizardStepButtons.length) return;
+  const resolvedStep = Array.from(wizardStepButtons).some((button) => button.dataset.wizardStep === stepId)
+    ? stepId
+    : wizardStepButtons[0].dataset.wizardStep;
+
+  wizardStepButtons.forEach((button) => {
+    const isActive = button.dataset.wizardStep === resolvedStep;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-selected", isActive);
+  });
+
+  wizardPanels.forEach((panel) => {
+    panel.classList.toggle("active", panel.dataset.wizardPanel === resolvedStep);
+  });
+
+  const tabTarget = WIZARD_STEP_TO_TAB[resolvedStep];
+  if (tabTarget) switchTab(tabTarget);
+  sessionStorage.setItem(WIZARD_STEP_KEY, resolvedStep);
+}
+
+function setViewMode(mode) {
+  const resolvedMode = mode === "classic" ? "classic" : "wizard";
+  const currentWizardStep = document.querySelector(".wizard-step.active")?.dataset.wizardStep || sessionStorage.getItem(WIZARD_STEP_KEY) || "mail";
+
+  if (resolvedMode === "wizard") {
+    mountWizardContent();
+    document.body.classList.add("view-wizard");
+    document.body.classList.remove("view-classic");
+    showWizardStep(sessionStorage.getItem(WIZARD_STEP_KEY) || "mail");
+  } else {
+    restoreClassicContent();
+    document.body.classList.add("view-classic");
+    document.body.classList.remove("view-wizard");
+    switchTab(WIZARD_STEP_TO_TAB[currentWizardStep] || sessionStorage.getItem("compta-tab") || "triage");
+  }
+
+  viewModeButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.viewMode === resolvedMode);
+  });
+  sessionStorage.setItem(VIEW_MODE_KEY, resolvedMode);
+}
+
+if (wizardShell) {
+  if (wizardMonthInput) {
+    wizardMonthInput.max = getCurrentMonthValue();
+    updateWizardMonth(sessionStorage.getItem(WIZARD_MONTH_KEY) || getDefaultWizardMonth());
+
+    document.querySelectorAll("[data-month-shift]").forEach((button) => {
+      button.addEventListener("click", () => {
+        updateWizardMonth(shiftMonth(wizardMonthInput.value, Number(button.dataset.monthShift || 0)));
+      });
+    });
+    wizardMonthInput.addEventListener("change", () => updateWizardMonth(wizardMonthInput.value));
+  }
+
+  wizardStepButtons.forEach((button) => {
+    button.addEventListener("click", () => showWizardStep(button.dataset.wizardStep));
+  });
+  document.querySelectorAll(".wizard-next-btn").forEach((button) => {
+    button.addEventListener("click", () => showWizardStep(button.dataset.nextStep));
+  });
+  viewModeButtons.forEach((button) => {
+    button.addEventListener("click", () => setViewMode(button.dataset.viewMode));
+  });
+
+  setViewMode(sessionStorage.getItem(VIEW_MODE_KEY) || "wizard");
+}
+
 // === Credentials: hide fields when saved, show edit button ===
 function revealCredFields(inputIds, badgeId, editBtnId) {
   for (const id of inputIds) {
@@ -85,6 +297,7 @@ function revealCredFields(inputIds, badgeId, editBtnId) {
       { key: "orange_username", inputIds: ["orange-username", "orange-password"], badge: "orange-saved-badge", editBtn: "orange-edit-btn", also: "orange_password" },
       { key: "sosh_username", inputIds: ["sosh-username", "sosh-password"], badge: "sosh-saved-badge", editBtn: "sosh-edit-btn", also: "sosh_password" },
       { key: "freebox_username", inputIds: ["freebox-username", "freebox-password"], badge: "freebox-saved-badge", editBtn: "freebox-edit-btn", also: "freebox_password" },
+      { key: "ovh_app_key", inputIds: ["ovh-app-key", "ovh-app-secret", "ovh-consumer-key"], badge: "ovh-saved-badge", editBtn: "ovh-edit-btn", also: "ovh_app_secret" },
       { key: "engie_email", inputIds: ["engie-email", "engie-password"], badge: "engie-saved-badge", editBtn: "engie-edit-btn", also: "engie_password" },
     ];
 
@@ -226,11 +439,145 @@ if (pickFolderBtn) {
   });
 }
 
+// === Async scan helpers (SSE-based) ===
+async function runScanSSE(url, formData, btn, resultDiv, formatProgress, formatComplete) {
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.textContent = "⏳ Scanning…";
+  resultDiv.hidden = false;
+  resultDiv.className = "scan-result scan-result-progress";
+  resultDiv.textContent = "Starting…";
+
+  try {
+    const resp = await fetch(url, { method: "POST", body: formData });
+    if (!resp.ok && !resp.headers.get("content-type")?.includes("text/event-stream")) {
+      const data = await resp.json();
+      resultDiv.className = "scan-result scan-result-error";
+      resultDiv.textContent = data.detail || "Error";
+      return;
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const event = JSON.parse(line.slice(6));
+
+        if (event.type === "status") {
+          resultDiv.innerHTML = `<span>⏳ ${event.message}</span>`;
+        } else if (event.type === "start") {
+          resultDiv.innerHTML = `<span>⏳ Found ${event.total} items…</span>`;
+        } else if (event.type === "progress") {
+          const pct = event.total > 0 ? Math.round((event.current / event.total) * 100) : 0;
+          resultDiv.innerHTML = `<div class="fetch-progress-bar"><div class="fetch-progress-fill" style="width:${pct}%"></div></div><span>${formatProgress(event)}</span>`;
+        } else if (event.type === "complete") {
+          resultDiv.className = "scan-result scan-result-success";
+          resultDiv.innerHTML = formatComplete(event.result);
+          // Auto-refresh panels after scan completes
+          setTimeout(() => refreshDocumentsPanel(), 300);
+        } else if (event.type === "error") {
+          resultDiv.className = "scan-result scan-result-error";
+          resultDiv.textContent = event.error;
+        }
+      }
+    }
+  } catch (err) {
+    resultDiv.className = "scan-result scan-result-error";
+    resultDiv.textContent = `Network error: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+}
+
+// Mail scan form
+if (scanMailForm) {
+  scanMailForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const btn = document.getElementById("scan-mail-btn");
+    const resultDiv = document.getElementById("scan-mail-result");
+    const formData = new FormData(scanMailForm);
+    runScanSSE("/scan", formData, btn, resultDiv,
+      (ev) => `${ev.current}/${ev.total} threads · ${ev.new || 0} new · ${ev.triage || 0} triage`,
+      (r) => {
+        const parts = [];
+        parts.push(`✅ Scanned ${r.scanned_messages} messages`);
+        if (r.new_mails) parts.push(`📬 ${r.new_mails} new`);
+        if (r.triage_mails) parts.push(`📋 ${r.triage_mails} triage`);
+        if (r.attachments_extracted) parts.push(`📎 ${r.attachments_extracted} attachments`);
+        return parts.join(" · ");
+      }
+    );
+  });
+}
+
+// Folder scan form
+const scanFolderForm = document.getElementById("scan-folder-form");
+if (scanFolderForm) {
+  scanFolderForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const btn = document.getElementById("scan-folder-submit");
+    const resultDiv = document.getElementById("scan-folder-result");
+    const formData = new FormData(scanFolderForm);
+    runScanSSE("/scan-folder", formData, btn, resultDiv,
+      (ev) => `${ev.current}/${ev.total} files · ${ev.renamed || 0} renamed · ${ev.review || 0} review`,
+      (r) => {
+        const parts = [];
+        parts.push(`✅ Scanned ${r.scanned_messages} files`);
+        if (r.renamed) parts.push(`📄 ${r.renamed} renamed`);
+        if (r.rename_review_needed) parts.push(`📋 ${r.rename_review_needed} need review`);
+        if (r.duplicates_skipped) parts.push(`⏭ ${r.duplicates_skipped} duplicates`);
+        return parts.join(" · ");
+      }
+    );
+  });
+}
+
+// === Global fetch lock — prevent concurrent fetches ===
+let fetchInProgress = false;
+let fetchInProgressProvider = "";
+const ALL_FETCH_BTNS = [
+  "fetch-spotify-btn", "fetch-chatgpt-btn", "fetch-free-login-btn", "fetch-free-otp-btn",
+  "fetch-orange-btn", "fetch-sosh-btn", "fetch-freebox-btn", "fetch-ovh-btn", "fetch-engie-login-btn", "fetch-engie-otp-btn"
+];
+
+function acquireFetchLock(providerName) {
+  if (fetchInProgress) return false;
+  fetchInProgress = true;
+  fetchInProgressProvider = providerName;
+  // Disable all other fetch buttons
+  for (const id of ALL_FETCH_BTNS) {
+    const el = document.getElementById(id);
+    if (el) el.disabled = true;
+  }
+  return true;
+}
+
+function releaseFetchLock() {
+  fetchInProgress = false;
+  fetchInProgressProvider = "";
+  // Re-enable all fetch buttons
+  for (const id of ALL_FETCH_BTNS) {
+    const el = document.getElementById(id);
+    if (el) el.disabled = false;
+  }
+}
+
 // === Spotify fetch ===
 const spotifyForm = document.getElementById("fetch-spotify-form");
 if (spotifyForm) {
   spotifyForm.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (!acquireFetchLock("Spotify")) return;
     const btn = document.getElementById("fetch-spotify-btn");
     const resultDiv = document.getElementById("fetch-spotify-result");
     const spDcInput = document.getElementById("spotify-sp-dc");
@@ -292,9 +639,8 @@ if (spotifyForm) {
             if (parts.length === 0) parts.push("No new invoices to download.");
             resultDiv.className = "fetch-result fetch-result-success";
             resultDiv.innerHTML = parts.join("<br>");
-            // Reload page after a short delay to show new documents in the Documents tab
             if (r.downloaded > 0 || r.processed > 0) {
-              setTimeout(() => { window.location.reload(); }, 2000);
+              resultDiv.innerHTML += '<br><a href="/" class="btn btn-outline btn-sm" style="margin-top:8px">🔄 Refresh to see new documents</a>';
             }
           } else if (event.type === "error") {
             resultDiv.className = "fetch-result fetch-result-error";
@@ -307,6 +653,7 @@ if (spotifyForm) {
       resultDiv.className = "fetch-result fetch-result-error";
       resultDiv.textContent = `Network error: ${err.message}`;
     } finally {
+      releaseFetchLock();
       btn.disabled = false;
       btn.textContent = "🔄 Fetch invoices";
     }
@@ -318,6 +665,7 @@ const chatgptForm = document.getElementById("fetch-chatgpt-form");
 if (chatgptForm) {
   chatgptForm.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (!acquireFetchLock("ChatGPT")) return;
     const btn = document.getElementById("fetch-chatgpt-btn");
     const resultDiv = document.getElementById("fetch-chatgpt-result");
     const bearerInput = document.getElementById("chatgpt-bearer");
@@ -379,7 +727,7 @@ if (chatgptForm) {
             resultDiv.className = "fetch-result fetch-result-success";
             resultDiv.innerHTML = parts.join("<br>");
             if (r.downloaded > 0 || r.processed > 0) {
-              setTimeout(() => { window.location.reload(); }, 2000);
+              resultDiv.innerHTML += '<br><a href="/" class="btn btn-outline btn-sm" style="margin-top:8px">🔄 Refresh to see new documents</a>';
             }
           } else if (event.type === "error") {
             resultDiv.className = "fetch-result fetch-result-error";
@@ -392,6 +740,7 @@ if (chatgptForm) {
       resultDiv.className = "fetch-result fetch-result-error";
       resultDiv.textContent = `Network error: ${err.message}`;
     } finally {
+      releaseFetchLock();
       btn.disabled = false;
       btn.textContent = "🔄 Fetch invoices";
     }
@@ -405,6 +754,7 @@ if (freeLoginForm) {
 
   freeLoginForm.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (!acquireFetchLock("Free Mobile")) return;
     const btn = document.getElementById("fetch-free-login-btn");
     const resultDiv = document.getElementById("fetch-free-result");
     const otpForm = document.getElementById("fetch-free-otp-form");
@@ -431,6 +781,7 @@ if (freeLoginForm) {
         resultDiv.className = "fetch-result fetch-result-error";
         resultDiv.textContent = data.error || "Login failed";
         revealCredFields(["free-username", "free-password"], "free-saved-badge", "free-edit-btn");
+        releaseFetchLock();
         return;
       }
 
@@ -439,11 +790,13 @@ if (freeLoginForm) {
         resultDiv.className = "fetch-result fetch-result-progress";
         resultDiv.textContent = "✅ Code sent to your email! Enter it below.";
         otpForm.hidden = false;
+        document.getElementById("fetch-free-otp-btn").disabled = false;
         document.getElementById("free-otp").focus();
       }
     } catch (err) {
       resultDiv.className = "fetch-result fetch-result-error";
       resultDiv.textContent = `Network error: ${err.message}`;
+      releaseFetchLock();
     } finally {
       btn.disabled = false;
       btn.textContent = "🔑 Login";
@@ -513,6 +866,7 @@ if (freeLoginForm) {
       resultDiv.className = "fetch-result fetch-result-error";
       resultDiv.textContent = `Network error: ${err.message}`;
     } finally {
+      releaseFetchLock();
       btn.disabled = false;
       btn.textContent = "✅ Validate & Fetch";
     }
@@ -524,6 +878,7 @@ const orangeForm = document.getElementById("fetch-orange-form");
 if (orangeForm) {
   orangeForm.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (!acquireFetchLock("Orange")) return;
     const btn = document.getElementById("fetch-orange-btn");
     const resultDiv = document.getElementById("fetch-orange-result");
     const usernameInput = document.getElementById("orange-username");
@@ -587,6 +942,7 @@ if (orangeForm) {
       resultDiv.className = "fetch-result fetch-result-error";
       resultDiv.textContent = `Network error: ${err.message}`;
     } finally {
+      releaseFetchLock();
       btn.disabled = false;
       btn.textContent = "📥 Fetch Invoices";
     }
@@ -598,6 +954,7 @@ const soshForm = document.getElementById("fetch-sosh-form");
 if (soshForm) {
   soshForm.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (!acquireFetchLock("Sosh")) return;
     const btn = document.getElementById("fetch-sosh-btn");
     const resultDiv = document.getElementById("fetch-sosh-result");
     const usernameInput = document.getElementById("sosh-username");
@@ -661,6 +1018,7 @@ if (soshForm) {
       resultDiv.className = "fetch-result fetch-result-error";
       resultDiv.textContent = `Network error: ${err.message}`;
     } finally {
+      releaseFetchLock();
       btn.disabled = false;
       btn.textContent = "📥 Fetch Invoices";
     }
@@ -672,6 +1030,7 @@ const freeboxForm = document.getElementById("fetch-freebox-form");
 if (freeboxForm) {
   freeboxForm.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (!acquireFetchLock("Freebox")) return;
     const btn = document.getElementById("fetch-freebox-btn");
     const resultDiv = document.getElementById("fetch-freebox-result");
     const usernameInput = document.getElementById("freebox-username");
@@ -735,6 +1094,86 @@ if (freeboxForm) {
       resultDiv.className = "fetch-result fetch-result-error";
       resultDiv.textContent = `Network error: ${err.message}`;
     } finally {
+      releaseFetchLock();
+      btn.disabled = false;
+      btn.textContent = "📥 Fetch Invoices";
+    }
+  });
+}
+
+// === OVH fetch ===
+const ovhForm = document.getElementById("fetch-ovh-form");
+if (ovhForm) {
+  ovhForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!acquireFetchLock("OVH")) return;
+    const btn = document.getElementById("fetch-ovh-btn");
+    const resultDiv = document.getElementById("fetch-ovh-result");
+    const appKeyInput = document.getElementById("ovh-app-key");
+    const appSecretInput = document.getElementById("ovh-app-secret");
+    const consumerKeyInput = document.getElementById("ovh-consumer-key");
+    const appKey = appKeyInput.hidden ? "" : appKeyInput.value.trim();
+    const appSecret = appSecretInput.hidden ? "" : appSecretInput.value.trim();
+    const consumerKey = consumerKeyInput.hidden ? "" : consumerKeyInput.value.trim();
+
+    if (!appKeyInput.hidden && (!appKey || !appSecret || !consumerKey)) return;
+    btn.disabled = true;
+    btn.textContent = "Fetching…";
+    resultDiv.hidden = false;
+    resultDiv.className = "fetch-result fetch-result-progress";
+    resultDiv.textContent = "Connecting to OVH API…";
+
+    try {
+      const formData = new FormData();
+      formData.append("app_key", appKey);
+      formData.append("app_secret", appSecret);
+      formData.append("consumer_key", consumerKey);
+      const resp = await fetch("/api/ovh-fetch", { method: "POST", body: formData });
+      if (!resp.ok) {
+        const data = await resp.json();
+        resultDiv.className = "fetch-result fetch-result-error";
+        resultDiv.textContent = data.error || `Server error: ${resp.status}`;
+        revealCredFields(["ovh-app-key", "ovh-app-secret", "ovh-consumer-key"], "ovh-saved-badge", "ovh-edit-btn");
+        return;
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const event = JSON.parse(line.slice(6));
+          if (event.type === "progress") {
+            const pct = Math.round((event.current / event.total) * 100);
+            resultDiv.innerHTML = `<div class="fetch-progress-bar"><div class="fetch-progress-fill" style="width:${pct}%"></div></div><span>${event.message}</span>`;
+          } else if (event.type === "status") {
+            resultDiv.textContent = event.message;
+          } else if (event.type === "complete") {
+            const r = event.result;
+            resultDiv.className = "fetch-result fetch-result-success";
+            let msg = `Done! ${r.downloaded} downloaded, ${r.skipped} skipped.`;
+            if (r.processed) msg += ` ${r.processed} processed.`;
+            if (r.message) msg += ` ${r.message}`;
+            if (r.errors && r.errors.length) msg += ` (${r.errors.length} errors)`;
+            resultDiv.textContent = msg;
+          } else if (event.type === "error") {
+            resultDiv.className = "fetch-result fetch-result-error";
+            resultDiv.textContent = event.error;
+            revealCredFields(["ovh-app-key", "ovh-app-secret", "ovh-consumer-key"], "ovh-saved-badge", "ovh-edit-btn");
+          }
+        }
+      }
+    } catch (err) {
+      resultDiv.className = "fetch-result fetch-result-error";
+      resultDiv.textContent = `Network error: ${err.message}`;
+    } finally {
+      releaseFetchLock();
       btn.disabled = false;
       btn.textContent = "📥 Fetch Invoices";
     }
@@ -746,6 +1185,7 @@ const engieLoginForm = document.getElementById("fetch-engie-login-form");
 if (engieLoginForm) {
   engieLoginForm.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (!acquireFetchLock("Engie Pro")) return;
     const btn = document.getElementById("fetch-engie-login-btn");
     const resultDiv = document.getElementById("fetch-engie-result");
     const emailInput = document.getElementById("engie-email");
@@ -771,6 +1211,7 @@ if (engieLoginForm) {
         resultDiv.className = "fetch-result fetch-result-error";
         resultDiv.textContent = data.error || `Server error: ${resp.status}`;
         revealCredFields(["engie-email", "engie-password"], "engie-saved-badge", "engie-edit-btn");
+        releaseFetchLock();
         return;
       }
 
@@ -781,6 +1222,7 @@ if (engieLoginForm) {
         document.getElementById("engie-user-id").value = data.user_id;
         document.getElementById("engie-form-build-id").value = data.form_build_id;
         document.getElementById("fetch-engie-otp-form").hidden = false;
+        document.getElementById("fetch-engie-otp-btn").disabled = false;
         resultDiv.className = "fetch-result fetch-result-progress";
         resultDiv.textContent = "Security code sent to your email. Enter it below.";
         document.getElementById("engie-otp-code").focus();
@@ -791,6 +1233,7 @@ if (engieLoginForm) {
     } catch (err) {
       resultDiv.className = "fetch-result fetch-result-error";
       resultDiv.textContent = `Network error: ${err.message}`;
+      releaseFetchLock();
     } finally {
       btn.disabled = false;
       btn.textContent = "🔐 Login";
@@ -863,6 +1306,7 @@ if (engieOtpForm) {
       resultDiv.className = "fetch-result fetch-result-error";
       resultDiv.textContent = `Network error: ${err.message}`;
     } finally {
+      releaseFetchLock();
       btn.disabled = false;
       btn.textContent = "📥 Validate & Fetch";
     }
@@ -921,8 +1365,7 @@ if (exportAllBtn) {
         exportResult.className = "fetch-result fetch-result-success";
         let msg = `✅ Moved ${data.moved} file(s) to ${data.output_dir}`;
         if (data.errors.length) msg += ` (${data.errors.length} error(s))`;
-        exportResult.textContent = msg;
-        setTimeout(() => window.location.reload(), 1500);
+        exportResult.innerHTML = msg + '<br><a href="/" class="btn btn-outline btn-sm" style="margin-top:8px">🔄 Refresh</a>';
       } else if (data.errors.length) {
         exportResult.className = "fetch-result fetch-result-error";
         exportResult.textContent = data.errors.join("; ");
@@ -1019,6 +1462,85 @@ if (exportAllBtn) {
   });
 })();
 
+// === Shared panel refresh ===
+async function dismissProviderHandler() {
+  const btn = this;
+  const vendor = btn.dataset.vendor;
+  const card = btn.closest(".missing-provider-card");
+  const formData = new FormData();
+  formData.append("vendor", vendor);
+  await fetch("/api/dismiss-provider-suggestion", { method: "POST", body: formData });
+  card.style.transition = "opacity 0.2s, transform 0.2s";
+  card.style.opacity = "0";
+  card.style.transform = "scale(0.95)";
+  setTimeout(() => {
+    card.remove();
+    const section = document.querySelector(".missing-providers-section");
+    if (section && !section.querySelector(".missing-provider-card")) {
+      section.remove();
+    }
+  }, 200);
+}
+
+async function refreshDocumentsPanel() {
+  const scrollY = window.scrollY;
+  const html = await (await fetch("/", {headers: {"Accept": "text/html"}})).text();
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+  const freshPanel = doc.getElementById("panel-documents");
+  const currentPanel = document.getElementById("panel-documents");
+  if (freshPanel && currentPanel) currentPanel.innerHTML = freshPanel.innerHTML;
+  // Also refresh export panel (documents move between panels)
+  const freshExport = doc.getElementById("panel-export");
+  const currentExport = document.getElementById("panel-export");
+  if (freshExport && currentExport) currentExport.innerHTML = freshExport.innerHTML;
+  // Refresh triage panel
+  const freshTriage = doc.getElementById("panel-triage");
+  const currentTriage = document.getElementById("panel-triage");
+  if (freshTriage && currentTriage) currentTriage.innerHTML = freshTriage.innerHTML;
+  // Refresh fetch panel badges and missing providers (without replacing forms)
+  const freshFetch = doc.getElementById("panel-fetch");
+  const currentFetch = document.getElementById("panel-fetch");
+  if (freshFetch && currentFetch) {
+    // Update provider hint badges by data attribute
+    freshFetch.querySelectorAll("[data-provider-hint]").forEach(freshBadge => {
+      const key = freshBadge.dataset.providerHint;
+      const currentBadge = currentFetch.querySelector(`[data-provider-hint="${key}"]`);
+      if (currentBadge) {
+        currentBadge.textContent = freshBadge.textContent;
+        currentBadge.hidden = freshBadge.hidden;
+      }
+    });
+    // Replace missing providers section
+    const freshMissing = freshFetch.querySelector(".missing-providers-section");
+    const currentMissing = currentFetch.querySelector(".missing-providers-section");
+    if (freshMissing && currentMissing) {
+      currentMissing.replaceWith(freshMissing.cloneNode(true));
+    } else if (freshMissing && !currentMissing) {
+      const h2 = currentFetch.querySelector("h2");
+      if (h2) h2.insertAdjacentElement("afterend", freshMissing.cloneNode(true));
+    } else if (!freshMissing && currentMissing) {
+      currentMissing.remove();
+    }
+  }
+  // Update tab badge counts
+  const freshTabs = doc.querySelectorAll(".tab[data-tab] .tab-count");
+  freshTabs.forEach(freshCount => {
+    const tab = freshCount.closest("[data-tab]");
+    if (tab) {
+      const currentTab = document.querySelector(`.tab[data-tab="${tab.dataset.tab}"] .tab-count`);
+      if (currentTab) currentTab.textContent = freshCount.textContent;
+    }
+  });
+  // Re-bind dismiss buttons on fresh fetch panel
+  document.querySelectorAll(".dismiss-provider-btn").forEach(btn => {
+    if (btn._dismissBound) return;
+    btn._dismissBound = true;
+    btn.addEventListener("click", dismissProviderHandler);
+  });
+  window.scrollTo(0, scrollY);
+}
+
 // === Month kanban: collapse & bulk actions ===
 (function() {
   // Collapse toggle
@@ -1040,7 +1562,7 @@ if (exportAllBtn) {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({ids, status}),
     });
-    location.reload();
+    await refreshDocumentsPanel();
   }
 
   // Bulk dismiss (permanent)
@@ -1051,7 +1573,24 @@ if (exportAllBtn) {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({ids}),
     });
-    location.reload();
+    await refreshDocumentsPanel();
+  }
+
+  function updateKanbanCounts() {
+    // Update section counts after DOM removal
+    document.querySelectorAll(".doc-kanban-section").forEach(section => {
+      const cards = section.querySelectorAll("article");
+      const countEl = section.querySelector(".count-label");
+      if (countEl) countEl.textContent = cards.length;
+      const emptyNote = section.querySelector(".kanban-empty");
+      if (cards.length === 0 && !emptyNote) {
+        const empty = document.createElement("div");
+        empty.className = "kanban-empty";
+        empty.textContent = "—";
+        const board = section.querySelector(".kanban-board");
+        if (board) board.appendChild(empty);
+      }
+    });
   }
 
   function parseIds(btn) {
@@ -1071,5 +1610,156 @@ if (exportAllBtn) {
       if (!confirm("Permanently dismiss these skipped documents? They won't reappear.")) return;
       bulkDismiss(parseIds(dismissBtn));
     }
+  });
+
+  // Re-rename button with progress
+  const reRenameBtn = document.getElementById("re-rename-btn");
+  if (reRenameBtn) {
+    reRenameBtn.addEventListener("click", async () => {
+      reRenameBtn.disabled = true;
+      // Insert progress bar after the button
+      const bar = document.createElement("div");
+      bar.className = "re-rename-progress";
+      bar.innerHTML = '<div class="re-rename-progress-track"><div class="re-rename-progress-fill"></div></div><span class="re-rename-progress-label">Starting…</span>';
+      reRenameBtn.parentElement.appendChild(bar);
+      const fill = bar.querySelector(".re-rename-progress-fill");
+      const label = bar.querySelector(".re-rename-progress-label");
+
+      try {
+        const resp = await fetch("/documents/re-rename", {method: "POST"});
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const {done, value} = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, {stream: true});
+          const lines = buf.split("\n\n");
+          buf = lines.pop();
+          for (const line of lines) {
+            const m = line.match(/^data: (.+)$/m);
+            if (!m) continue;
+            const evt = JSON.parse(m[1]);
+            if (evt.type === "start") {
+              label.textContent = `0 / ${evt.total}`;
+            } else if (evt.type === "progress") {
+              const pct = Math.round((evt.current / evt.total) * 100);
+              fill.style.width = pct + "%";
+              label.textContent = `${evt.current} / ${evt.total} — ${evt.filename}`;
+            } else if (evt.type === "done") {
+              fill.style.width = "100%";
+              label.textContent = `✓ ${evt.updated} documents updated`;
+              setTimeout(() => location.reload(), 1000);
+            }
+          }
+        }
+      } catch (err) {
+        label.textContent = "❌ Error";
+        reRenameBtn.disabled = false;
+      }
+    });
+  }
+})();
+
+// === Triage tabs and bulk actions ===
+(function() {
+  // Tab switching
+  document.querySelectorAll(".triage-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      const section = tab.closest(".doc-triage-section");
+      section.querySelectorAll(".triage-tab").forEach(t => t.classList.remove("active"));
+      section.querySelectorAll(".triage-tab-panel").forEach(p => p.classList.remove("active"));
+      tab.classList.add("active");
+      const panel = section.querySelector(`[data-triage-panel="${tab.dataset.triageTab}"]`);
+      if (panel) panel.classList.add("active");
+    });
+  });
+
+  // Bulk accept suggested
+  document.addEventListener("click", async (e) => {
+    const btn = e.target.closest(".bulk-accept-suggested");
+    if (!btn) return;
+    const ids = (btn.dataset.ids || "").split(",").filter(Boolean).map(Number);
+    if (!ids.length) return;
+    btn.disabled = true;
+    btn.textContent = "⏳ Processing…";
+    try {
+      const resp = await fetch("/documents/bulk-accept-suggested", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ids}),
+      });
+      const data = await resp.json();
+      btn.textContent = `✓ ${data.count} accepted`;
+      setTimeout(() => refreshDocumentsPanel(), 400);
+    } catch (err) {
+      btn.textContent = "❌ Error";
+      btn.disabled = false;
+    }
+  });
+
+  // Bulk skip triage
+  document.addEventListener("click", async (e) => {
+    const btn = e.target.closest(".bulk-skip-triage");
+    if (!btn) return;
+    const ids = (btn.dataset.ids || "").split(",").filter(Boolean).map(Number);
+    if (!ids.length) return;
+    btn.disabled = true;
+    btn.textContent = "⏳ Skipping…";
+    try {
+      await fetch("/documents/bulk-status", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ids, status: "review_ignored"}),
+      });
+      btn.textContent = `✓ ${ids.length} skipped`;
+      setTimeout(() => refreshDocumentsPanel(), 400);
+    } catch (err) {
+      btn.textContent = "❌ Error";
+      btn.disabled = false;
+    }
+  });
+})();
+
+// === Inline form interception (preserve scroll) ===
+(function() {
+  document.addEventListener("submit", async (e) => {
+    const form = e.target;
+    // Intercept inline status forms, rename forms, and the rename modal
+    const isInline = form.matches(".inline-form") || form.matches(".rename-form");
+    const isRenameModal = form.id === "rename-modal-form";
+    if (!isInline && !isRenameModal) return;
+    e.preventDefault();
+
+    const action = form.action;
+    const submitter = e.submitter;
+    const formData = new FormData(form);
+    // Include the submit button's name/value (not auto-included by FormData)
+    if (submitter && submitter.name) {
+      formData.set(submitter.name, submitter.value);
+    }
+    const card = isRenameModal
+      ? document.querySelector(`[data-doc-id="${action.match(/documents\/(\d+)/)?.[1]}"]`)?.closest("article")
+      : form.closest("article");
+
+    try {
+      await fetch(action, { method: "POST", body: formData, redirect: "manual" });
+      if (isRenameModal) {
+        document.getElementById("rename-modal").hidden = true;
+      }
+      if (card) {
+        card.style.transition = "opacity 0.2s, transform 0.2s";
+        card.style.opacity = "0";
+        card.style.transform = "scale(0.95)";
+      }
+      // After fade, refresh the documents panel in-place
+      setTimeout(() => refreshDocumentsPanel(), 250);
+    } catch (err) {
+      form.submit();
+    }
+  });
+
+  document.querySelectorAll(".dismiss-provider-btn").forEach(btn => {
+    btn.addEventListener("click", dismissProviderHandler);
   });
 })();

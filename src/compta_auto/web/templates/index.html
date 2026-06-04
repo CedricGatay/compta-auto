@@ -4,50 +4,65 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Compta Auto</title>
-    <link rel="stylesheet" href="/static/styles.css?v=8">
-    <script src="/static/app.js?v=19" defer></script>
+    <link rel="stylesheet" href="/static/styles.css?v=9">
+    <script src="/static/app.js?v=20" defer></script>
   </head>
   <body>
+    {% set triage_count = mails|selectattr("status", "equalto", "mail_triage_needed")|list|length %}
+    {% set review_count = documents|selectattr("status", "equalto", "rename_review_needed")|list|length + documents|selectattr("status", "equalto", "renamed")|list|length %}
+    {% set export_count = documents|selectattr("status", "equalto", "doc_included")|list|length %}
+    {% set provider_link_count = provider_tasks|length %}
+
     <header>
       <div class="header-left">
         <h1>Compta Auto</h1>
         <span class="header-stats">
-          {% set triage_count = mails|selectattr("status", "equalto", "mail_triage_needed")|list|length %}
-          {% set review_count = documents|selectattr("status", "equalto", "rename_review_needed")|list|length + documents|selectattr("status", "equalto", "renamed")|list|length %}
           {% if triage_count %}<span class="badge badge-warning">{{ triage_count }} triage</span>{% endif %}
           {% if review_count %}<span class="badge badge-info">{{ review_count }} review</span>{% endif %}
         </span>
       </div>
       <div class="header-actions">
-        <form method="post" action="/scan" class="header-form">
-          <label>
-            <input name="months" type="number" min="1" max="24" value="1" title="Months to scan">
-            <span class="input-unit">months</span>
-          </label>
-          <button type="submit">⟳ Scan mail</button>
-        </form>
-        <form method="post" action="/scan-folder" class="header-form" id="scan-folder-form">
-          <input type="hidden" name="folder" id="scan-folder-path" value="{{ last_scan_folder }}">
-          <button type="button" id="pick-folder-btn" class="btn btn-outline btn-sm" title="{{ last_scan_folder or 'Click to select folder' }}">
-            📂 <span id="pick-folder-label">{{ last_scan_folder.split('/')[-1] if last_scan_folder else 'Pick folder…' }}</span>
-          </button>
-          <select name="timespan" title="Only scan files modified within this period">
-            {% if last_scan_folder_date %}
-            <option value="since_last" selected>Since last scan</option>
-            {% endif %}
-            <option value="7">1 week</option>
-            <option value="14">2 weeks</option>
-            <option value="21">3 weeks</option>
-            <option value="28">4 weeks</option>
-            <option value="30"{% if not last_scan_folder_date %} selected{% endif %}>1 month</option>
-            <option value="60">2 months</option>
-            <option value="90">3 months</option>
-          </select>
-          <button type="submit"{% if not last_scan_folder %} disabled{% endif %} id="scan-folder-submit">📁 Scan</button>
-          {% if last_scan_folder_date %}
-          <span class="scan-last-date" title="{{ last_scan_folder_date }}">Last: {{ last_scan_folder_date[:10] }}</span>
-          {% endif %}
-        </form>
+        <div class="view-mode-links" aria-label="Layout mode">
+          <button type="button" class="view-mode-link" data-view-mode="wizard">🧙 Wizard</button>
+          <button type="button" class="view-mode-link" data-view-mode="classic">📋 Full interface</button>
+        </div>
+        <div class="header-shortcuts">
+          <div class="header-home" data-header-home="scan-mail">
+            <form method="post" action="/scan" class="header-form" id="scan-mail-form">
+              <label>
+                <input name="months" type="number" min="1" max="24" value="1" title="Months to scan">
+                <span class="input-unit">months</span>
+              </label>
+              <button type="submit" class="btn btn-primary btn-sm" id="scan-mail-btn">⟳ Scan mail</button>
+              <div id="scan-mail-result" class="scan-result" hidden></div>
+            </form>
+          </div>
+          <div class="header-home" data-header-home="scan-folder">
+            <form method="post" action="/scan-folder" class="header-form" id="scan-folder-form">
+              <input type="hidden" name="folder" id="scan-folder-path" value="{{ last_scan_folder }}">
+              <button type="button" id="pick-folder-btn" class="btn btn-outline btn-sm" title="{{ last_scan_folder or 'Click to select folder' }}">
+                📂 <span id="pick-folder-label">{{ last_scan_folder.split('/')[-1] if last_scan_folder else 'Pick folder…' }}</span>
+              </button>
+              <select name="timespan" title="Only scan files modified within this period">
+                {% if last_scan_folder_date %}
+                <option value="since_last" selected>Since last scan</option>
+                {% endif %}
+                <option value="7">1 week</option>
+                <option value="14">2 weeks</option>
+                <option value="21">3 weeks</option>
+                <option value="28">4 weeks</option>
+                <option value="30"{% if not last_scan_folder_date %} selected{% endif %}>1 month</option>
+                <option value="60">2 months</option>
+                <option value="90">3 months</option>
+              </select>
+              <button type="submit" class="btn btn-primary btn-sm"{% if not last_scan_folder %} disabled{% endif %} id="scan-folder-submit">📁 Scan</button>
+              {% if last_scan_folder_date %}
+              <span class="scan-last-date" title="{{ last_scan_folder_date }}">Last: {{ last_scan_folder_date[:10] }}</span>
+              {% endif %}
+              <div id="scan-folder-result" class="scan-result" hidden></div>
+            </form>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -65,22 +80,195 @@
       <button class="tab" role="tab" aria-selected="false" data-tab="fetch">Fetch</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="export">
         Export
-        {% set export_count = documents|selectattr("status", "equalto", "doc_included")|list|length %}
         {% if export_count %}<span class="tab-count">{{ export_count }}</span>{% endif %}
       </button>
       <button class="tab" role="tab" aria-selected="false" data-tab="settings">Settings</button>
     </nav>
 
     <main>
+      <section class="wizard-shell" id="wizard-shell" aria-label="Monthly workflow wizard">
+        <div class="wizard-hero">
+          <div class="wizard-hero-copy">
+            <span class="wizard-kicker">Monthly workflow</span>
+            <h2>Close each month with a guided flow</h2>
+            <p>Pick the target month, collect every source, then finish triage and renaming without losing context.</p>
+          </div>
+          <div class="wizard-month-picker" aria-label="Target month picker">
+            <button type="button" class="wizard-month-nav" data-month-shift="-1" aria-label="Previous month">←</button>
+            <div class="wizard-month-center">
+              <span class="wizard-month-label">Target month</span>
+              <div class="wizard-month-display" id="wizard-month-display">—</div>
+              <input type="month" id="wizard-month-input" class="wizard-month-input">
+              <p class="wizard-month-hint" id="wizard-month-hint"></p>
+            </div>
+            <button type="button" class="wizard-month-nav" data-month-shift="1" aria-label="Next month">→</button>
+          </div>
+        </div>
+
+        <div class="wizard-stepper" role="tablist" aria-label="Workflow steps">
+          <button class="wizard-step active" type="button" data-wizard-step="mail" role="tab" aria-selected="true">
+            <span class="wizard-step-index">1</span>
+            <span class="wizard-step-copy">
+              <span class="wizard-step-title">📧 Mail</span>
+              <span class="wizard-step-status" id="wizard-status-mail">Preparing target month…</span>
+            </span>
+          </button>
+          <button class="wizard-step" type="button" data-wizard-step="fetch" role="tab" aria-selected="false">
+            <span class="wizard-step-index">2</span>
+            <span class="wizard-step-copy">
+              <span class="wizard-step-title">🔗 Fetch providers</span>
+              <span class="wizard-step-status">{% if provider_link_count %}{{ provider_link_count }} provider links saved{% else %}7 providers ready{% endif %}</span>
+            </span>
+          </button>
+          <button class="wizard-step" type="button" data-wizard-step="folder" role="tab" aria-selected="false">
+            <span class="wizard-step-index">3</span>
+            <span class="wizard-step-copy">
+              <span class="wizard-step-title">📁 Scan folder</span>
+              <span class="wizard-step-status">{{ last_scan_folder.split('/')[-1] if last_scan_folder else 'Pick a folder' }}</span>
+            </span>
+          </button>
+          <button class="wizard-step" type="button" data-wizard-step="triage" role="tab" aria-selected="false">
+            <span class="wizard-step-index">4</span>
+            <span class="wizard-step-copy">
+              <span class="wizard-step-title">📋 Triage</span>
+              <span class="wizard-step-status">{% if triage_count %}{{ triage_count }} mails to review{% else %}✓ Nothing to do{% endif %}</span>
+            </span>
+          </button>
+          <button class="wizard-step" type="button" data-wizard-step="rename" role="tab" aria-selected="false">
+            <span class="wizard-step-index">5</span>
+            <span class="wizard-step-copy">
+              <span class="wizard-step-title">📂 Rename</span>
+              <span class="wizard-step-status">{% if review_count %}{{ review_count }} documents queued{% else %}✓ Nothing to do{% endif %}</span>
+            </span>
+          </button>
+          <button class="wizard-step" type="button" data-wizard-step="export" role="tab" aria-selected="false">
+            <span class="wizard-step-index">6</span>
+            <span class="wizard-step-copy">
+              <span class="wizard-step-title">📦 Export</span>
+              <span class="wizard-step-status">{% if export_count %}{{ export_count }} ready{% else %}✓ Nothing to export{% endif %}</span>
+            </span>
+          </button>
+        </div>
+
+        <div class="wizard-stage">
+          <section class="wizard-panel active" data-wizard-panel="mail" role="tabpanel">
+            <div class="wizard-panel-intro">
+              <div>
+                <span class="wizard-panel-step">Step 1</span>
+                <h3>📧 Scan mail for <span data-wizard-month-label>—</span></h3>
+                <p>Reuse the existing scan action with the selected month translated into the mail scan window.</p>
+              </div>
+            </div>
+            <div class="wizard-inline-context" id="wizard-mail-context"></div>
+            <div class="wizard-slot" data-wizard-slot="mail"></div>
+            <div class="wizard-panel-actions">
+              <button type="button" class="btn btn-primary wizard-next-btn" data-next-step="fetch">Next →</button>
+            </div>
+          </section>
+
+          <section class="wizard-panel" data-wizard-panel="fetch" role="tabpanel">
+            <div class="wizard-panel-intro">
+              <div>
+                <span class="wizard-panel-step">Step 2</span>
+                <h3>🔗 Fetch provider invoices</h3>
+                <p>Pull missing invoices before reviewing the month so every document lands in the same workflow.</p>
+              </div>
+            </div>
+            <div class="wizard-slot" data-wizard-slot="fetch"></div>
+            <div class="wizard-panel-actions">
+              <button type="button" class="btn btn-primary wizard-next-btn" data-next-step="folder">Next →</button>
+            </div>
+          </section>
+
+          <section class="wizard-panel" data-wizard-panel="folder" role="tabpanel">
+            <div class="wizard-panel-intro">
+              <div>
+                <span class="wizard-panel-step">Step 3</span>
+                <h3>📁 Scan a local folder</h3>
+                <p>Bring PDFs and screenshots from Finder into the same month-focused queue for <span data-wizard-month-label>—</span>.</p>
+              </div>
+            </div>
+            <div class="wizard-slot" data-wizard-slot="folder"></div>
+            <div class="wizard-panel-actions">
+              <button type="button" class="btn btn-primary wizard-next-btn" data-next-step="triage">Next →</button>
+            </div>
+          </section>
+
+          <section class="wizard-panel" data-wizard-panel="triage" role="tabpanel">
+            <div class="wizard-panel-intro">
+              <div>
+                <span class="wizard-panel-step">Step 4</span>
+                <h3>📋 Review incoming mails</h3>
+                <p>Decide what should be processed automatically and keep the inbox clean before renaming documents.</p>
+              </div>
+            </div>
+            <div class="wizard-slot" data-wizard-slot="triage"></div>
+            {% if not triage_count %}
+            <div class="wizard-empty-note">
+              <strong>✓ Nothing to do</strong>
+              <p>No mails are waiting for triage right now. You can jump straight to document renaming.</p>
+            </div>
+            {% endif %}
+            <div class="wizard-panel-actions">
+              <button type="button" class="btn btn-primary wizard-next-btn" data-next-step="rename">Next →</button>
+            </div>
+          </section>
+
+          <section class="wizard-panel" data-wizard-panel="rename" role="tabpanel">
+            <div class="wizard-panel-intro">
+              <div>
+                <span class="wizard-panel-step">Step 5</span>
+                <h3>📂 Review and rename documents</h3>
+                <p>Finish the month by validating filenames, then switch to the full interface for export or settings.</p>
+              </div>
+            </div>
+            <div class="wizard-slot" data-wizard-slot="rename"></div>
+            {% if not review_count %}
+            <div class="wizard-empty-note">
+              <strong>✓ Nothing to do</strong>
+              <p>No documents are waiting for review. You can open the full interface or start another month.</p>
+            </div>
+            {% endif %}
+            <div class="wizard-panel-actions wizard-panel-actions-split">
+              <button type="button" class="btn btn-outline wizard-next-btn" data-next-step="mail">Start again ↺</button>
+              <button type="button" class="btn btn-primary wizard-next-btn" data-next-step="export">Next →</button>
+            </div>
+          </section>
+
+          <section class="wizard-panel" data-wizard-panel="export" role="tabpanel">
+            <div class="wizard-panel-intro">
+              <div>
+                <span class="wizard-panel-step">Step 6</span>
+                <h3>📦 Export — folder structure preview</h3>
+                <p>Review the final folder structure, then rename &amp; move all included documents to the output directory.</p>
+              </div>
+            </div>
+            <div class="wizard-slot" data-wizard-slot="export"></div>
+            {% if not export_count %}
+            <div class="wizard-empty-note">
+              <strong>✓ Nothing to export</strong>
+              <p>No documents are included yet. Go back to the Rename step and include some documents first.</p>
+            </div>
+            {% endif %}
+            <div class="wizard-panel-actions wizard-panel-actions-split">
+              <button type="button" class="btn btn-outline wizard-next-btn" data-next-step="mail">Start again ↺</button>
+              <button type="button" class="btn btn-primary" data-view-mode="classic">📋 Full interface</button>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <div id="classic-panels">
       <!-- TRIAGE TAB -->
-      <div class="tab-panel active" id="panel-triage" role="tabpanel">
+      <div class="panel-home" data-panel-home="triage">
+        <div class="tab-panel active" id="panel-triage" role="tabpanel">
         {% set triage_mails = mails|selectattr("status", "equalto", "mail_triage_needed")|list %}
         {% set domain_suffix = "@" + settings.accounting_domain %}
-        {% set accounting_mails = [] %}
+        {% set invoice_mails = [] %}
         {% set other_mails = [] %}
         {% for mail in triage_mails %}
-          {% if domain_suffix in mail.recipients_display %}
-            {% set _ = accounting_mails.append(mail) %}
+          {% if mail.is_likely_invoice or domain_suffix in mail.recipients_display %}
+            {% set _ = invoice_mails.append(mail) %}
           {% else %}
             {% set _ = other_mails.append(mail) %}
           {% endif %}
@@ -92,12 +280,12 @@
         </div>
         {% else %}
         <div class="subtabs" role="tablist">
-          <button class="subtab active" role="tab" aria-selected="true" data-subtab="triage-accounting">
-            {{ settings.accounting_domain }}
-            {% if accounting_mails %}<span class="subtab-count">{{ accounting_mails|length }}</span>{% endif %}
+          <button class="subtab active" role="tab" aria-selected="true" data-subtab="triage-invoices">
+            📄 Likely invoices
+            {% if invoice_mails %}<span class="subtab-count">{{ invoice_mails|length }}</span>{% endif %}
           </button>
           <button class="subtab" role="tab" aria-selected="false" data-subtab="triage-other">
-            Other inboxes
+            Other
             {% if other_mails %}<span class="subtab-count">{{ other_mails|length }}</span>{% endif %}
           </button>
           <button class="subtab" role="tab" aria-selected="false" data-subtab="triage-all">
@@ -106,12 +294,12 @@
           </button>
         </div>
 
-        <div class="subtab-panel active" id="subpanel-triage-accounting">
-          {% if not accounting_mails %}
-          <div class="empty-state"><p>No triage mails for {{ settings.accounting_domain }}</p></div>
+        <div class="subtab-panel active" id="subpanel-triage-invoices">
+          {% if not invoice_mails %}
+          <div class="empty-state"><p>No likely invoice mails in triage</p></div>
           {% else %}
           <div class="card-list">
-            {% for mail in accounting_mails %}
+            {% for mail in invoice_mails %}
             {% include "partials/mail_card.html" %}
             {% endfor %}
           </div>
@@ -120,7 +308,7 @@
 
         <div class="subtab-panel" id="subpanel-triage-other">
           {% if not other_mails %}
-          <div class="empty-state"><p>No triage mails for other inboxes</p></div>
+          <div class="empty-state"><p>No other mails in triage</p></div>
           {% else %}
           <div class="card-list">
             {% for mail in other_mails %}
@@ -138,53 +326,153 @@
           </div>
         </div>
         {% endif %}
+        </div>
       </div>
 
       <!-- DOCUMENTS TAB -->
-      <div class="tab-panel" id="panel-documents" role="tabpanel">
+      <div class="panel-home" data-panel-home="documents">
+        <div class="tab-panel" id="panel-documents" role="tabpanel">
         {% set triage_docs = documents|selectattr("status", "equalto", "rename_review_needed")|list %}
         {% set renamed_docs = documents|selectattr("status", "equalto", "renamed")|list %}
         {% set included_docs = documents|selectattr("status", "equalto", "doc_included")|list %}
         {% set skipped_docs = documents|selectattr("status", "equalto", "review_ignored")|list %}
 
+        {% if triage_docs or renamed_docs %}
+        <div class="panel-actions-bar">
+          <button type="button" class="btn btn-outline btn-sm" id="re-rename-btn" title="Re-run automatic renaming on all documents (keeps manually renamed ones intact)">🔄 Re-rename all</button>
+        </div>
+        {% endif %}
+
         <!-- RENAME TRIAGE -->
         {% if triage_docs %}
+        {% set pdf_triage = triage_docs|selectattr("preview_kind", "equalto", "pdf")|list %}
+        {% set other_triage = triage_docs|rejectattr("preview_kind", "equalto", "pdf")|list %}
+        {% set pdf_with_suggestion = pdf_triage|selectattr("accept_vendor")|selectattr("accept_date")|list %}
+        {% set other_with_suggestion = other_triage|selectattr("accept_vendor")|selectattr("accept_date")|list %}
         <section class="doc-triage-section">
           <h2 class="section-title">📋 Rename triage <span class="count-label">{{ triage_docs|length }}</span></h2>
-          <div class="doc-triage-grid">
-            {% for document in triage_docs %}
-            <article class="doc-triage-card">
-              <button class="preview doc-triage-preview" type="button"
-                data-preview-url="{{ document.raw_preview_url }}" data-open-url="{{ document.raw_open_url }}"
-                data-preview-name="{{ document.original_filename }}" data-preview-kind="{{ document.modal_preview_kind }}">
-                <span class="preview-icon preview-icon-{{ document.preview_kind }}">{{ document.preview_label }}</span>
-                {% if document.preview_kind == "image" %}
-                <img src="{{ document.raw_preview_url }}" alt="{{ document.original_filename }}" loading="lazy">
-                {% endif %}
-              </button>
-              <div class="doc-triage-body">
-                <div class="doc-triage-filename" title="{{ document.original_filename }}">{{ document.original_filename }}</div>
-                <div class="doc-triage-meta">
-                  {% if document.source_from_display %}<span>From: {{ document.source_from_display }}</span>{% endif %}
-                  {% if document.detected_vendor %}<span>Vendor: <strong>{{ document.detected_vendor }}</strong></span>{% endif %}
-                  {% if document.detected_date %}<span>Date: {{ document.detected_date }}</span>{% endif %}
+          <div class="triage-tabs">
+            <button type="button" class="triage-tab active" data-triage-tab="pdf">📄 PDF <span class="count-label">{{ pdf_triage|length }}</span></button>
+            <button type="button" class="triage-tab" data-triage-tab="other">📎 Other <span class="count-label">{{ other_triage|length }}</span></button>
+          </div>
+
+          <!-- PDF tab -->
+          <div class="triage-tab-panel active" data-triage-panel="pdf">
+            {% if pdf_triage %}
+            <div class="triage-bulk-actions">
+              <button type="button" class="btn btn-success btn-sm bulk-accept-suggested"
+                data-ids="{{ pdf_with_suggestion|map(attribute='id')|list|join(',') }}"
+                {% if not pdf_with_suggestion %}disabled{% endif %}>✓ Use suggested for all ({{ pdf_with_suggestion|length }})</button>
+              <button type="button" class="btn btn-ghost btn-sm bulk-skip-triage"
+                data-ids="{{ pdf_triage|map(attribute='id')|list|join(',') }}">✗ Skip all ({{ pdf_triage|length }})</button>
+            </div>
+            <div class="doc-triage-grid">
+              {% for document in pdf_triage %}
+              <article class="doc-triage-card" data-doc-id="{{ document.id }}">
+                <button class="preview doc-triage-preview" type="button"
+                  data-preview-url="{{ document.raw_preview_url }}" data-open-url="{{ document.raw_open_url }}"
+                  data-preview-name="{{ document.original_filename }}" data-preview-kind="{{ document.modal_preview_kind }}">
+                  <span class="preview-icon preview-icon-{{ document.preview_kind }}">{{ document.preview_label }}</span>
+                </button>
+                <div class="doc-triage-body">
+                  <div class="doc-triage-filename" title="{{ document.original_filename }}">{{ document.original_filename }}</div>
+                  <div class="doc-triage-meta">
+                    {% if document.source_from_display %}<span>From: {{ document.source_from_display }}</span>{% endif %}
+                    {% if document.detected_vendor %}<span>Vendor: <strong>{{ document.detected_vendor }}</strong></span>{% endif %}
+                    {% if document.detected_date %}<span>Date: {{ document.detected_date }}</span>{% endif %}
+                  </div>
+                  {% if document.supposed_filename %}
+                  <div class="doc-triage-suggested">→ <code>{{ document.supposed_filename }}</code></div>
+                  {% endif %}
+                  <div class="doc-triage-actions">
+                    <button type="button" class="btn btn-outline btn-sm inline-rename-toggle"
+                      data-doc-id="{{ document.id }}"
+                      data-doc-date="{{ document.accept_date }}"
+                      data-doc-vendor="{{ document.accept_vendor }}"
+                      data-doc-name="{{ document.original_filename }}"
+                      title="Edit rename">✏️ Rename</button>
+                    <form method="post" action="/documents/{{ document.id }}/keep" class="inline-form">
+                      <button type="submit" class="btn btn-outline btn-sm" title="Keep original filename: {{ document.original_filename }}">📄 Keep current</button>
+                    </form>
+                    {% if document.accept_vendor and document.accept_date %}
+                    <form method="post" action="/documents/{{ document.id }}/rename" class="inline-form">
+                      <input type="hidden" name="vendor" value="{{ document.accept_vendor }}">
+                      <input type="hidden" name="date" value="{{ document.accept_date }}">
+                      <button type="submit" class="btn btn-success btn-sm" title="Use: {{ document.supposed_filename }}">✓ Use suggested</button>
+                    </form>
+                    {% endif %}
+                    <form method="post" action="/documents/{{ document.id }}/status" class="inline-form">
+                      <input type="hidden" name="status" value="review_ignored"><button type="submit" class="btn btn-ghost btn-sm">Skip</button>
+                    </form>
+                  </div>
                 </div>
-                {% if document.supposed_filename %}
-                <div class="doc-triage-suggested">→ <code>{{ document.supposed_filename }}</code></div>
-                {% endif %}
-                <div class="doc-triage-actions">
-                  <form class="rename-form" method="post" action="/documents/{{ document.id }}/rename">
-                    <input name="date" type="date" value="{{ document.detected_date or '' }}" required>
-                    <input name="vendor" value="{{ document.detected_vendor or '' }}" placeholder="vendor" required>
-                    <button type="submit" class="btn btn-primary btn-sm">Rename</button>
-                  </form>
-                  <form method="post" action="/documents/{{ document.id }}/status" class="inline-form">
-                    <button name="status" value="review_ignored" class="btn btn-ghost btn-xs">Skip</button>
-                  </form>
+              </article>
+              {% endfor %}
+            </div>
+            {% else %}
+            <p class="triage-empty">No PDF documents in triage.</p>
+            {% endif %}
+          </div>
+
+          <!-- Other files tab -->
+          <div class="triage-tab-panel" data-triage-panel="other">
+            {% if other_triage %}
+            <div class="triage-bulk-actions">
+              <button type="button" class="btn btn-success btn-sm bulk-accept-suggested"
+                data-ids="{{ other_with_suggestion|map(attribute='id')|list|join(',') }}"
+                {% if not other_with_suggestion %}disabled{% endif %}>✓ Use suggested for all ({{ other_with_suggestion|length }})</button>
+              <button type="button" class="btn btn-ghost btn-sm bulk-skip-triage"
+                data-ids="{{ other_triage|map(attribute='id')|list|join(',') }}">✗ Skip all ({{ other_triage|length }})</button>
+            </div>
+            <div class="doc-triage-grid">
+              {% for document in other_triage %}
+              <article class="doc-triage-card" data-doc-id="{{ document.id }}">
+                <button class="preview doc-triage-preview" type="button"
+                  data-preview-url="{{ document.raw_preview_url }}" data-open-url="{{ document.raw_open_url }}"
+                  data-preview-name="{{ document.original_filename }}" data-preview-kind="{{ document.modal_preview_kind }}">
+                  <span class="preview-icon preview-icon-{{ document.preview_kind }}">{{ document.preview_label }}</span>
+                  {% if document.preview_kind == "image" %}
+                  <img src="{{ document.raw_preview_url }}" alt="{{ document.original_filename }}" loading="lazy">
+                  {% endif %}
+                </button>
+                <div class="doc-triage-body">
+                  <div class="doc-triage-filename" title="{{ document.original_filename }}">{{ document.original_filename }}</div>
+                  <div class="doc-triage-meta">
+                    {% if document.source_from_display %}<span>From: {{ document.source_from_display }}</span>{% endif %}
+                    {% if document.detected_vendor %}<span>Vendor: <strong>{{ document.detected_vendor }}</strong></span>{% endif %}
+                    {% if document.detected_date %}<span>Date: {{ document.detected_date }}</span>{% endif %}
+                  </div>
+                  {% if document.supposed_filename %}
+                  <div class="doc-triage-suggested">→ <code>{{ document.supposed_filename }}</code></div>
+                  {% endif %}
+                  <div class="doc-triage-actions">
+                    <button type="button" class="btn btn-outline btn-sm inline-rename-toggle"
+                      data-doc-id="{{ document.id }}"
+                      data-doc-date="{{ document.accept_date }}"
+                      data-doc-vendor="{{ document.accept_vendor }}"
+                      data-doc-name="{{ document.original_filename }}"
+                      title="Edit rename">✏️ Rename</button>
+                    <form method="post" action="/documents/{{ document.id }}/keep" class="inline-form">
+                      <button type="submit" class="btn btn-outline btn-sm" title="Keep original filename: {{ document.original_filename }}">📄 Keep current</button>
+                    </form>
+                    {% if document.accept_vendor and document.accept_date %}
+                    <form method="post" action="/documents/{{ document.id }}/rename" class="inline-form">
+                      <input type="hidden" name="vendor" value="{{ document.accept_vendor }}">
+                      <input type="hidden" name="date" value="{{ document.accept_date }}">
+                      <button type="submit" class="btn btn-success btn-sm" title="Use: {{ document.supposed_filename }}">✓ Use suggested</button>
+                    </form>
+                    {% endif %}
+                    <form method="post" action="/documents/{{ document.id }}/status" class="inline-form">
+                      <input type="hidden" name="status" value="review_ignored"><button type="submit" class="btn btn-ghost btn-sm">Skip</button>
+                    </form>
+                  </div>
                 </div>
-              </div>
-            </article>
-            {% endfor %}
+              </article>
+              {% endfor %}
+            </div>
+            {% else %}
+            <p class="triage-empty">No other documents in triage.</p>
+            {% endif %}
           </div>
         </section>
         {% endif %}
@@ -225,6 +513,14 @@
                 <span class="kanban-header-icon">📥</span>
                 <span class="kanban-header-title">To sort</span>
                 <span class="count-label">{{ month_renamed|length }}</span>
+                {% if month_renamed %}
+                <div class="kanban-header-actions">
+                  <button type="button" class="btn btn-primary btn-xs bulk-include-month"
+                    data-ids="{{ month_renamed|map(attribute='id')|list|join(',') }}">✓ All</button>
+                  <button type="button" class="btn btn-ghost btn-xs bulk-skip-month"
+                    data-ids="{{ month_renamed|map(attribute='id')|list|join(',') }}">✗ All</button>
+                </div>
+                {% endif %}
               </div>
               <div class="kanban-items">
                 {% for document in month_renamed %}
@@ -245,8 +541,8 @@
                   </div>
                   <div class="kanban-card-actions">
                     <form method="post" action="/documents/{{ document.id }}/status" class="inline-form">
-                      <button name="status" value="doc_included" class="btn btn-primary btn-xs">✓ Include</button>
-                      <button name="status" value="review_ignored" class="btn btn-ghost btn-xs">✗ Skip</button>
+                      <input type="hidden" name="status" value="doc_included"><button type="submit" class="btn btn-primary btn-xs">✓ Include</button>
+                      <input type="hidden" name="status" value="review_ignored"><button type="submit" class="btn btn-ghost btn-xs">✗ Skip</button>
                     </form>
                     <button type="button" class="btn btn-outline btn-xs inline-rename-toggle"
                       data-doc-id="{{ document.id }}" data-doc-date="{{ document.detected_date or '' }}" data-doc-vendor="{{ document.detected_vendor or '' }}"
@@ -295,8 +591,8 @@
                   </div>
                   <div class="kanban-card-actions">
                     <form method="post" action="/documents/{{ document.id }}/status" class="inline-form">
-                      <button name="status" value="renamed" class="btn btn-ghost btn-xs">← Unsort</button>
-                      <button name="status" value="review_ignored" class="btn btn-ghost btn-xs">→ Skip</button>
+                      <input type="hidden" name="status" value="renamed"><button type="submit" class="btn btn-ghost btn-xs">← Unsort</button>
+                      <input type="hidden" name="status" value="review_ignored"><button type="submit" class="btn btn-ghost btn-xs">→ Skip</button>
                     </form>
                     <button type="button" class="btn btn-outline btn-xs inline-rename-toggle"
                       data-doc-id="{{ document.id }}" data-doc-date="{{ document.detected_date or '' }}" data-doc-vendor="{{ document.detected_vendor or '' }}"
@@ -333,8 +629,8 @@
                   </div>
                   <div class="kanban-card-actions">
                     <form method="post" action="/documents/{{ document.id }}/status" class="inline-form">
-                      <button name="status" value="renamed" class="btn btn-ghost btn-xs">← Unsort</button>
-                      <button name="status" value="doc_included" class="btn btn-outline btn-xs">← Include</button>
+                      <input type="hidden" name="status" value="renamed"><button type="submit" class="btn btn-ghost btn-xs">← Unsort</button>
+                      <input type="hidden" name="status" value="doc_included"><button type="submit" class="btn btn-outline btn-xs">← Include</button>
                     </form>
                   </div>
                 </article>
@@ -352,6 +648,7 @@
         {% if not triage_docs and not renamed_docs and not included_docs and not skipped_docs %}
         <div class="empty-state"><p>No documents yet. Run a scan to extract attachments.</p></div>
         {% endif %}
+        </div>
       </div>
 
       <!-- PROCESSED TAB -->
@@ -468,11 +765,31 @@
       </div>
 
       <!-- FETCH TAB -->
-      <div class="tab-panel" id="panel-fetch" role="tabpanel">
+      <div class="panel-home" data-panel-home="fetch">
+        <div class="tab-panel" id="panel-fetch" role="tabpanel">
         <h2 class="section-title">Fetch invoices from providers</h2>
 
+        {% if missing_providers %}
+        <section class="missing-providers-section">
+          <h3>💡 Suggested providers <span class="count-label">{{ missing_providers|length }}</span></h3>
+          <p class="fetch-description">These senders look like invoicing providers but have no fetcher configured yet.</p>
+          <div class="missing-providers-list">
+            {% for mp in missing_providers %}
+            <div class="missing-provider-card" data-vendor="{{ mp.vendor }}">
+              <div class="missing-provider-info">
+                <strong>{{ mp.vendor }}</strong>
+                <span class="missing-provider-meta">{{ mp.mail_count }} mail{{ 's' if mp.mail_count > 1 else '' }} — from {{ mp.sample_sender }}</span>
+                <span class="missing-provider-sample">{{ mp.sample_subject }}</span>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm dismiss-provider-btn" data-vendor="{{ mp.vendor }}" title="Dismiss this suggestion">✕</button>
+            </div>
+            {% endfor %}
+          </div>
+        </section>
+        {% endif %}
+
         <section class="fetch-section">
-          <h3>🎵 Spotify</h3>
+          <h3>🎵 Spotify<span class="badge badge-info provider-hint-badge" data-provider-hint="spotify" {% if not provider_hint_counts.get('spotify') %}hidden{% endif %}>📬 {{ provider_hint_counts.get('spotify', 0) }}</span>{% if last_fetch.spotify %}<span class="last-fetch-badge">Last: {{ last_fetch.spotify[:16] }}</span>{% endif %}</h3>
           <p class="fetch-description">
             Download all available Spotify receipts using your session cookie.
             To get your <code>sp_dc</code> cookie: log in to
@@ -491,7 +808,7 @@
         </section>
 
         <section class="fetch-section">
-          <h3>🤖 ChatGPT</h3>
+          <h3>🤖 ChatGPT<span class="badge badge-info provider-hint-badge" data-provider-hint="openai" {% if not provider_hint_counts.get('openai') %}hidden{% endif %}>📬 {{ provider_hint_counts.get('openai', 0) }}</span>{% if last_fetch.openai %}<span class="last-fetch-badge">Last: {{ last_fetch.openai[:16] }}</span>{% endif %}</h3>
           <p class="fetch-description">
             Download all ChatGPT Plus subscription invoices from Stripe.
             To get your Bearer token: go to
@@ -511,7 +828,7 @@
         </section>
 
         <section class="fetch-section">
-          <h3>📱 Free Mobile</h3>
+          <h3>📱 Free Mobile<span class="badge badge-info provider-hint-badge" data-provider-hint="free_mobile" {% if not provider_hint_counts.get('free_mobile') %}hidden{% endif %}>📬 {{ provider_hint_counts.get('free_mobile', 0) }}</span>{% if last_fetch.free_mobile %}<span class="last-fetch-badge">Last: {{ last_fetch.free_mobile[:16] }}</span>{% endif %}</h3>
           <p class="fetch-description">
             Download all Free Mobile invoices from your account.
             Login requires OTP verification — a code will be sent to your email.
@@ -535,7 +852,7 @@
         </section>
 
         <section class="fetch-section">
-          <h3>🍊 Orange / Sosh</h3>
+          <h3>🍊 Orange / Sosh<span class="badge badge-info provider-hint-badge" data-provider-hint="orange_sosh" {% if not (provider_hint_counts.get('orange') or provider_hint_counts.get('sosh')) %}hidden{% endif %}>📬 {{ (provider_hint_counts.get('orange', 0) or 0) + (provider_hint_counts.get('sosh', 0) or 0) }}</span>{% if last_fetch.orange %}<span class="last-fetch-badge">Last: {{ last_fetch.orange[:16] }}</span>{% endif %}</h3>
           <p class="fetch-description">
             Download all Orange or Sosh invoices from your account.
             Uses a headless browser — may take 15-30 seconds.
@@ -553,7 +870,7 @@
         </section>
 
         <section class="fetch-section">
-          <h3>🟢 Sosh</h3>
+          <h3>🟢 Sosh<span class="badge badge-info provider-hint-badge" data-provider-hint="sosh" {% if not provider_hint_counts.get('sosh') %}hidden{% endif %}>📬 {{ provider_hint_counts.get('sosh', 0) }}</span>{% if last_fetch.sosh %}<span class="last-fetch-badge">Last: {{ last_fetch.sosh[:16] }}</span>{% endif %}</h3>
           <p class="fetch-description">
             Download all Sosh invoices from your account.
             Uses a headless browser — may take 15-30 seconds.
@@ -571,7 +888,7 @@
         </section>
 
         <section class="fetch-section">
-          <h3>📦 Freebox (ISP)</h3>
+          <h3>📦 Freebox (ISP)<span class="badge badge-info provider-hint-badge" data-provider-hint="freebox" {% if not provider_hint_counts.get('freebox') %}hidden{% endif %}>📬 {{ provider_hint_counts.get('freebox', 0) }}</span>{% if last_fetch.freebox %}<span class="last-fetch-badge">Last: {{ last_fetch.freebox[:16] }}</span>{% endif %}</h3>
           <p class="fetch-description">
             Download all Freebox ISP invoices from your subscriber portal.
             Uses your Freebox identifier and password (no OTP needed).
@@ -589,7 +906,26 @@
         </section>
 
         <section class="fetch-section">
-          <h3>⚡ Engie Pro</h3>
+          <h3>☁️ OVH<span class="badge badge-info provider-hint-badge" data-provider-hint="ovh" {% if not provider_hint_counts.get('ovh') %}hidden{% endif %}>📬 {{ provider_hint_counts.get('ovh', 0) }}</span>{% if last_fetch.ovh %}<span class="last-fetch-badge">Last: {{ last_fetch.ovh[:16] }}</span>{% endif %}</h3>
+          <p class="fetch-description">
+            Download all OVH invoices via the official API.
+            Requires API credentials from <a href="https://api.ovh.com/createApp/" target="_blank">api.ovh.com/createApp</a>.
+          </p>
+          <form id="fetch-ovh-form" class="fetch-form">
+            <div class="fetch-input-row">
+              <span class="cred-saved-badge" id="ovh-saved-badge" hidden>🔑 Saved</span>
+              <input type="text" name="app_key" id="ovh-app-key" placeholder="Application Key" autocomplete="off" style="max-width:180px">
+              <input type="password" name="app_secret" id="ovh-app-secret" placeholder="Application Secret" autocomplete="off" style="max-width:180px">
+              <input type="password" name="consumer_key" id="ovh-consumer-key" placeholder="Consumer Key" autocomplete="off" style="max-width:180px">
+              <button type="submit" class="btn btn-primary" id="fetch-ovh-btn">📥 Fetch Invoices</button>
+              <button type="button" class="btn btn-sm btn-link cred-edit-btn" id="ovh-edit-btn" hidden>✏️</button>
+            </div>
+          </form>
+          <div id="fetch-ovh-result" class="fetch-result" hidden></div>
+        </section>
+
+        <section class="fetch-section">
+          <h3>⚡ Engie Pro<span class="badge badge-info provider-hint-badge" data-provider-hint="engie" {% if not provider_hint_counts.get('engie') %}hidden{% endif %}>📬 {{ provider_hint_counts.get('engie', 0) }}</span>{% if last_fetch.engie %}<span class="last-fetch-badge">Last: {{ last_fetch.engie[:16] }}</span>{% endif %}</h3>
           <p class="fetch-description">
             Download Engie Pro invoices. Requires a security code sent by email after login.
           </p>
@@ -614,7 +950,9 @@
           </form>
           <div id="fetch-engie-result" class="fetch-result" hidden></div>
         </section>
+        </div>
       </div>
+      <div class="panel-home" data-panel-home="export">
       <div class="tab-panel" id="panel-export" role="tabpanel">
         {% set export_docs = documents|selectattr("status", "equalto", "doc_included")|list %}
 
@@ -680,6 +1018,7 @@
 
         <div id="export-result" class="fetch-result" hidden></div>
       </div>
+      </div>
 
       <!-- SETTINGS TAB -->
       <div class="tab-panel" id="panel-settings" role="tabpanel">
@@ -744,6 +1083,16 @@
             <button type="submit" class="btn btn-danger btn-sm">Reset all data</button>
           </form>
         </div>
+        <div class="danger-zone" style="margin-top: 12px;">
+          <div class="danger-zone-info">
+            <strong>Purge everything</strong>
+            <p>Delete <em>all</em> data including rules, documents, mails, and settings. Only saved credentials (passwords/tokens) are preserved.</p>
+          </div>
+          <form method="post" action="/purge" onsubmit="return confirm('⚠️ This will delete ALL data — rules, documents, mails, everything. Only your saved credentials will remain. Continue?')">
+            <button type="submit" class="btn btn-danger btn-sm">Purge all data</button>
+          </form>
+        </div>
+      </div>
       </div>
     </main>
 

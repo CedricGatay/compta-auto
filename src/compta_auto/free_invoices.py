@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Generator
 
 FREE_MOBILE_BASE = "https://mobile.free.fr/account/v2"
-SEND_MAIL_ACTION_ID = "7f8c661e7506f4440f75ec9a95cfe6dac210fffb63"
+SEND_MAIL_ACTION_ID = "7fdbd72cf9658e42cc86a2a6059a70d7c600a44b05"
 
 
 class AuthError(Exception):
@@ -27,11 +27,26 @@ def _build_opener() -> tuple[urllib.request.OpenerDirector, http.cookiejar.Cooki
 
 
 def _get_csrf_token(opener: urllib.request.OpenerDirector) -> str:
-    """Get CSRF token from NextAuth."""
+    """Get CSRF token from NextAuth, first visiting login page for required cookies."""
+    ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+    # Visit login page first to get session cookies (csrf-token, callback-url)
+    page_req = urllib.request.Request(f"{FREE_MOBILE_BASE}/login", headers={
+        "User-Agent": ua,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    })
+    try:
+        with opener.open(page_req) as resp:
+            resp.read()  # consume body
+    except urllib.error.HTTPError:
+        pass  # non-critical, proceed anyway
+
+    # Get CSRF token from API
     url = f"{FREE_MOBILE_BASE}/api/auth/csrf"
     req = urllib.request.Request(url, headers={
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        "User-Agent": ua,
         "Accept": "application/json",
+        "Referer": f"{FREE_MOBILE_BASE}/login",
     })
     with opener.open(req) as resp:
         data = json.loads(resp.read().decode())
@@ -66,11 +81,11 @@ def _restore_cookies(opener: urllib.request.OpenerDirector, cj: http.cookiejar.C
         cj.set_cookie(cookie)
 
 
-def login(username: str, password: str, otp_via_email: bool = True) -> tuple[str, str]:
+def login(username: str, password: str) -> tuple[str, str, int]:
     """
-    Step 1: Login with credentials. Triggers OTP (email by default, SMS fallback).
-    Returns (session_cookies, csrf_token) for the OTP step.
-    Raises AuthError if credentials are invalid.
+    Step 1: Login with credentials. Triggers OTP via email.
+    Returns (session_cookies, csrf_token, otp_id).
+    Raises AuthError if credentials are invalid or email OTP fails.
     """
     opener, cj = _build_opener()
     csrf_token = _get_csrf_token(opener)
@@ -88,10 +103,14 @@ def login(username: str, password: str, otp_via_email: bool = True) -> tuple[str
         f"{FREE_MOBILE_BASE}/api/auth/callback/credentials",
         data=payload,
         headers={
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             "Content-Type": "application/x-www-form-urlencoded",
             "Origin": "https://mobile.free.fr",
             "Referer": f"{FREE_MOBILE_BASE}/login",
+            "Accept": "*/*",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Dest": "empty",
         },
     )
 
@@ -134,20 +153,122 @@ def login(username: str, password: str, otp_via_email: bool = True) -> tuple[str
 
     otp_id = session["user"].get("otpId")
 
-    # Request OTP via email instead of SMS
-    if otp_via_email:
-        mail_otp_id = _request_email_otp(opener, username)
+    # Send OTP via email — discover action ID and login prop from OTP page
+    action_ids, rsc_login = _discover_action_ids(opener)
+
+    # Build login candidates: RSC prop > username > phone-prefixed variants
+    login_candidates = []
+    if rsc_login:
+        login_candidates.append(rsc_login)
+    if username not in login_candidates:
+        login_candidates.append(username)
+
+    mail_otp_id = None
+    last_raw_response = ""
+    for action_id in action_ids:
+        for login_val in login_candidates:
+            mail_otp_id, raw = _request_email_otp(opener, login_val, action_id)
+            if raw:
+                last_raw_response = raw
+            if mail_otp_id:
+                break
         if mail_otp_id:
-            otp_id = mail_otp_id
+            break
+
+    if not mail_otp_id:
+        raise AuthError(
+            "Failed to send OTP via email. The Free Mobile portal may have changed "
+            f"(tried {len(action_ids)} action ID(s) with {len(login_candidates)} login variant(s)). "
+            f"Last response: {last_raw_response[:200]}. "
+            "Check that your Free Mobile account has email configured for 2FA."
+        )
+    otp_id = mail_otp_id
 
     # Get a fresh CSRF token for the OTP step
     csrf_token = _get_csrf_token(opener)
     return _serialize_cookies(cj), csrf_token, otp_id
 
 
-def _request_email_otp(opener: urllib.request.OpenerDirector, username: str) -> int | None:
-    """Call the sendMailAction server action to send OTP via email. Returns otpId."""
-    body = json.dumps([username])
+def _discover_action_ids(opener: urllib.request.OpenerDirector) -> tuple[list[str], str | None]:
+    """
+    Discover the sendMailAction ID and login prop from the OTP page.
+    Returns (action_id_candidates, login_prop_from_rsc).
+    """
+    candidates = []
+    login_prop = None
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        "Accept": "text/html",
+    }
+    try:
+        req = urllib.request.Request(f"{FREE_MOBILE_BASE}/otp", headers=headers)
+        with opener.open(req) as resp:
+            html = resp.read().decode()
+
+        # Extract login prop from RSC flight data embedded in the page
+        # The component receives {hasOtpSentBySMS, login} props
+        # In RSC format these can appear as: "login":"value" or in positional args
+        login_matches = re.findall(r'"login"\s*:\s*"([^"]+)"', html)
+        if login_matches:
+            login_prop = login_matches[0]
+        else:
+            # RSC flight data may use positional encoding - look for subscriber number pattern
+            # Free Mobile subscriber numbers are 8-digit numeric
+            numeric_matches = re.findall(r'(?<![a-f0-9])[0-9]{8}(?![0-9a-f])', html)
+            if numeric_matches:
+                login_prop = numeric_matches[0]
+
+        # Find OTP page-specific JS chunk
+        script_srcs = re.findall(r'src="([^"]+\.js)"', html)
+        otp_chunk = None
+        for src in script_srcs:
+            if "otp" in src.lower() and "page" in src.lower():
+                otp_chunk = src
+                break
+
+        if otp_chunk:
+            base = "https://mobile.free.fr"
+            url = f"{base}{otp_chunk}" if otp_chunk.startswith("/") else otp_chunk
+            try:
+                js_req = urllib.request.Request(url, headers={"User-Agent": headers["User-Agent"]})
+                with opener.open(js_req) as resp:
+                    js_content = resp.read().decode()
+                # Find createServerReference("...", ..., "sendMailAction")
+                m = re.search(r'createServerReference\("([a-f0-9]{40,})"[^)]*"sendMailAction"', js_content)
+                if m:
+                    candidates.append(m.group(1))
+                else:
+                    # Fallback: find any long hex ID near sendMailAction
+                    m = re.search(r'"([a-f0-9]{40,})"[^;]*sendMailAction', js_content)
+                    if m:
+                        candidates.append(m.group(1))
+            except Exception:
+                pass
+
+        # Also try extracting hex IDs from RSC data on the page (less targeted)
+        rsc_hex_ids = re.findall(r'"([a-f0-9]{40,})"', html)
+        for hid in rsc_hex_ids:
+            if hid not in candidates:
+                candidates.append(hid)
+
+    except Exception:
+        pass
+
+    # Deduplicate, hardcoded fallback last
+    seen = set()
+    unique = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            unique.append(c)
+    if SEND_MAIL_ACTION_ID not in seen:
+        unique.append(SEND_MAIL_ACTION_ID)
+    return unique, login_prop
+
+
+def _request_email_otp(opener: urllib.request.OpenerDirector, login: str, action_id: str) -> tuple[int | None, str]:
+    """Call the sendMailAction server action to send OTP via email. Returns (otpId, raw_response)."""
+    body = json.dumps([login])
     req = urllib.request.Request(
         f"{FREE_MOBILE_BASE}/otp",
         data=body.encode(),
@@ -155,7 +276,7 @@ def _request_email_otp(opener: urllib.request.OpenerDirector, username: str) -> 
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
             "Accept": "text/x-component",
             "Content-Type": "text/plain;charset=UTF-8",
-            "Next-Action": SEND_MAIL_ACTION_ID,
+            "Next-Action": action_id,
             "Origin": "https://mobile.free.fr",
             "Referer": f"{FREE_MOBILE_BASE}/otp",
         },
@@ -163,15 +284,29 @@ def _request_email_otp(opener: urllib.request.OpenerDirector, username: str) -> 
     try:
         with opener.open(req) as resp:
             result = resp.read().decode()
+            # Parse RSC flight response lines (format: "index:json_value")
             for line in result.split("\n"):
-                if "transport" in line:
-                    json_part = line.split(":", 1)[1] if ":" in line else line
-                    data = json.loads(json_part)
-                    if data.get("transport") == "mail":
-                        return data.get("id")
-    except Exception:
-        pass
-    return None
+                if not line or line.startswith("0:"):
+                    continue  # skip metadata line
+                parts = line.split(":", 1)
+                if len(parts) != 2:
+                    continue
+                payload = parts[1].strip()
+                if payload == "null" or payload == "":
+                    continue
+                try:
+                    data = json.loads(payload)
+                    # New format: {"id": 12345}
+                    if isinstance(data, dict) and "id" in data:
+                        return data["id"], result
+                    # Old format: {"transport": "mail", "id": 12345}
+                    if isinstance(data, dict) and data.get("transport") == "mail":
+                        return data.get("id"), result
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            return None, result
+    except Exception as e:
+        return None, str(e)
 
 
 def validate_otp(session_cookies: str, csrf_token: str, otp_code: str, otp_id: int | None = None) -> tuple[urllib.request.OpenerDirector, http.cookiejar.CookieJar]:
@@ -200,10 +335,14 @@ def validate_otp(session_cookies: str, csrf_token: str, otp_code: str, otp_id: i
         f"{FREE_MOBILE_BASE}/api/auth/callback/credentials",
         data=payload,
         headers={
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             "Content-Type": "application/x-www-form-urlencoded",
             "Origin": "https://mobile.free.fr",
             "Referer": f"{FREE_MOBILE_BASE}/otp",
+            "Accept": "*/*",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Dest": "empty",
         },
     )
 

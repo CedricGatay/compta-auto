@@ -2,51 +2,13 @@
 
 from __future__ import annotations
 
+import html
+import re
 from pathlib import Path
 
-from fpdf import FPDF
 
-
-def mail_to_pdf(
-    subject: str,
-    sender: str,
-    recipients: str,
-    sent_at: str | None,
-    body: str,
-    output_path: Path,
-) -> Path:
-    """Render mail metadata + body as a clean PDF invoice-style document."""
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=20)
-    pdf.add_page()
-
-    # Header
-    pdf.set_font("Helvetica", "B", 14)
-    pdf.multi_cell(0, 7, subject)
-    pdf.ln(4)
-
-    # Metadata block
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(100, 100, 100)
-    pdf.cell(0, 5, f"From: {sender}")
-    pdf.ln()
-    pdf.cell(0, 5, f"To: {recipients}")
-    pdf.ln()
-    if sent_at:
-        pdf.cell(0, 5, f"Date: {sent_at}")
-        pdf.ln()
-    pdf.ln(6)
-
-    # Separator
-    pdf.set_draw_color(200, 200, 200)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-    pdf.ln(6)
-
-    # Body
-    pdf.set_text_color(30, 30, 30)
-    pdf.set_font("Helvetica", "", 10)
-
-    # Strip Spark CLI preamble (everything before the first separator line)
+def _strip_spark_preamble(body: str) -> str:
+    """Remove the Spark CLI metadata header, keep only the mail content."""
     lines = body.splitlines()
     body_start = 0
     for i, line in enumerate(lines):
@@ -55,7 +17,7 @@ def mail_to_pdf(
             break
 
     clean_lines = lines[body_start:]
-    # Skip leading metadata lines after separator (ID, Subject, From, To, Date, Type)
+    # Skip leading metadata lines after separator
     content_start = 0
     for i, line in enumerate(clean_lines):
         stripped = line.strip()
@@ -66,16 +28,87 @@ def mail_to_pdf(
             content_start = i
             break
 
-    final_body = "\n".join(clean_lines[content_start:]).strip()
+    return "\n".join(clean_lines[content_start:]).strip()
 
-    # Wrap long lines and write
-    usable_width = pdf.w - pdf.l_margin - pdf.r_margin
-    for paragraph in final_body.split("\n"):
-        if not paragraph.strip():
-            pdf.ln(4)
-            continue
-        pdf.multi_cell(usable_width, 5, paragraph)
+
+def mail_to_pdf(
+    subject: str,
+    sender: str,
+    recipients: str,
+    sent_at: str | None,
+    body: str,
+    output_path: Path,
+) -> Path:
+    """Render mail as HTML then print to PDF via Playwright (headless Chromium)."""
+    import markdown
+
+    clean_body = _strip_spark_preamble(body)
+    body_html = markdown.markdown(clean_body, extensions=["tables"])
+
+    date_line = f'<p class="meta">Date: {html.escape(sent_at)}</p>' if sent_at else ""
+
+    full_html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body {{
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 11pt;
+    line-height: 1.6;
+    color: #1a1a1a;
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 40px 30px;
+  }}
+  .header {{
+    margin-bottom: 20px;
+    padding-bottom: 14px;
+    border-bottom: 2px solid #e5e5e5;
+  }}
+  .header h1 {{
+    font-size: 16pt;
+    margin: 0 0 6px 0;
+    color: #111;
+  }}
+  .meta {{
+    font-size: 9pt;
+    color: #666;
+    margin: 2px 0;
+  }}
+  .body h1 {{ font-size: 14pt; margin: 18px 0 8px 0; font-weight: 600; }}
+  .body h2 {{ font-size: 12pt; margin: 14px 0 6px 0; font-weight: 600; color: #333; }}
+  .body h3 {{ font-size: 10pt; margin: 12px 0 4px 0; font-weight: 600; color: #555; }}
+  .body p {{ margin: 4px 0; }}
+  .body a {{ color: #0066cc; text-decoration: none; }}
+  .body table {{ border-collapse: collapse; width: 100%; margin: 8px 0; }}
+  .body td, .body th {{ border: 1px solid #ddd; padding: 6px 10px; text-align: left; }}
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>{html.escape(subject)}</h1>
+    <p class="meta">From: {html.escape(sender)}</p>
+    <p class="meta">To: {html.escape(recipients)}</p>
+    {date_line}
+  </div>
+  <div class="body">
+    {body_html}
+  </div>
+</body>
+</html>"""
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    pdf.output(str(output_path))
+
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.set_content(full_html, wait_until="networkidle")
+        page.pdf(path=str(output_path), format="A4", margin={
+            "top": "15mm", "bottom": "15mm", "left": "15mm", "right": "15mm"
+        })
+        browser.close()
+
     return output_path

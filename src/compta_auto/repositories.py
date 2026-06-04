@@ -202,6 +202,38 @@ class Repository:
             for row in rows_to_dicts(self.conn.execute("SELECT * FROM mails ORDER BY id DESC LIMIT 200"))
         ]
 
+    def count_provider_hints(self) -> dict[str, int]:
+        """Count mail_provider_hint mails grouped by detected_vendor."""
+        rows = self.conn.execute(
+            "SELECT detected_vendor, COUNT(*) as cnt FROM mails WHERE status = 'mail_provider_hint' GROUP BY detected_vendor"
+        ).fetchall()
+        return {row["detected_vendor"]: row["cnt"] for row in rows if row["detected_vendor"]}
+
+    def list_missing_providers(self) -> list[dict[str, Any]]:
+        """List unique vendors from mail_missing_provider mails (not dismissed)."""
+        dismissed_json = self.get_app_state("dismissed_providers") or "[]"
+        import json as _json
+        dismissed = set(_json.loads(dismissed_json))
+        rows = self.conn.execute(
+            """SELECT detected_vendor, COUNT(*) as mail_count, MAX(subject) as sample_subject, MAX(sender) as sample_sender
+               FROM mails WHERE status = 'mail_missing_provider'
+               GROUP BY detected_vendor ORDER BY mail_count DESC"""
+        ).fetchall()
+        return [
+            {"vendor": row["detected_vendor"], "mail_count": row["mail_count"],
+             "sample_subject": row["sample_subject"], "sample_sender": row["sample_sender"]}
+            for row in rows
+            if row["detected_vendor"] and row["detected_vendor"] not in dismissed
+        ]
+
+    def dismiss_provider_suggestion(self, vendor: str) -> None:
+        """Add vendor to dismissed providers list."""
+        import json as _json
+        dismissed_json = self.get_app_state("dismissed_providers") or "[]"
+        dismissed = set(_json.loads(dismissed_json))
+        dismissed.add(vendor)
+        self.set_app_state("dismissed_providers", _json.dumps(sorted(dismissed)))
+
     def enrich_mail_with_attachments(self, row: dict[str, Any]) -> dict[str, Any]:
         attachments = [
             enrich_mail_attachment(attachment)
@@ -465,14 +497,30 @@ class Repository:
         self.conn.execute("DELETE FROM mails")
         self.conn.execute("DELETE FROM runs")
 
+    def purge_all(self) -> None:
+        """Delete ALL data except stored credentials (app_state keys starting with 'cred_')."""
+        self.conn.execute("DELETE FROM duplicate_sources")
+        self.conn.execute("DELETE FROM documents")
+        self.conn.execute("DELETE FROM mail_attachments")
+        self.conn.execute("DELETE FROM provider_tasks")
+        self.conn.execute("DELETE FROM mails")
+        self.conn.execute("DELETE FROM runs")
+        self.conn.execute("DELETE FROM vendor_rules")
+        self.conn.execute("DELETE FROM app_state WHERE key NOT LIKE 'cred_%'")
+
 
 def enrich_mail(row: dict[str, Any], attachments: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    from .models import INVOICE_STRONG_TERMS
+
     row = row.copy()
     recipients = parse_json_list(row.get("recipients"))
     row["recipients_list"] = recipients
     row["recipients_display"] = ", ".join(recipients)
     row["download_links"] = find_invoice_links(str(row.get("body") or ""))
     row["preview_items"] = mail_preview_items(attachments or [], row["download_links"])
+    # Flag likely invoices based on subject
+    subject_lower = (row.get("subject") or "").lower()
+    row["is_likely_invoice"] = any(term in subject_lower for term in INVOICE_STRONG_TERMS)
     return row
 
 
@@ -529,6 +577,20 @@ def enrich_document(row: dict[str, Any]) -> dict[str, Any]:
     # Month key for grouping (YYYY-MM or "Unknown")
     detected_date = row.get("detected_date") or ""
     row["month_key"] = detected_date[:7] if len(detected_date) >= 7 else "Unknown"
+    # Accept fields: derive vendor/date from final_filename (previously accepted name takes priority)
+    final_fn = row.get("final_filename") or ""
+    if final_fn:
+        import re
+        m = re.match(r"(\d{4})_(\d{2})_(\d{2})_(.+)\.\w+$", final_fn)
+        if m:
+            row["accept_date"] = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+            row["accept_vendor"] = m.group(4)
+        else:
+            row["accept_vendor"] = row.get("detected_vendor") or ""
+            row["accept_date"] = row.get("detected_date") or ""
+    else:
+        row["accept_vendor"] = row.get("detected_vendor") or ""
+        row["accept_date"] = row.get("detected_date") or ""
     return row
 
 

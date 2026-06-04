@@ -14,12 +14,18 @@ from .models import (
     INVOICE_MODERATE_TERMS,
     INVOICE_SENDER_PATTERNS,
     INVOICE_STRONG_TERMS,
+    ExtractedMetadata,
     MailMessage,
 )
 from .normalize import email_domain, normalize_vendor
 from .renamer import rename_document
 from .repositories import Repository
 from .spark_client import SparkClient
+
+# Vendors that have a configured fetcher — mails from these don't need triage
+FETCHER_VENDORS = frozenset({
+    "spotify", "openai", "free_mobile", "orange", "sosh", "freebox", "ovh", "engie",
+})
 
 
 @dataclass
@@ -73,7 +79,7 @@ class AccountingPipeline:
             raise
         return summary
 
-    def run_folder_scan(self, folder: Path, max_age_days: int = 30) -> RunSummary:
+    def run_folder_scan(self, folder: Path, max_age_days: int = 30, known_vendor: str | None = None) -> RunSummary:
         """Scan a local folder for receipts/invoices and process them."""
         import time
 
@@ -90,7 +96,7 @@ class AccountingPipeline:
                 if file_path.stat().st_mtime < cutoff:
                     continue
                 summary.scanned_messages += 1
-                self._process_local_file(file_path, summary)
+                self._process_local_file(file_path, summary, known_vendor=known_vendor)
             self.repo.finish_run(run_id, "finished", summary.as_dict())
         except Exception as exc:
             summary.failures.append(str(exc))
@@ -98,7 +104,7 @@ class AccountingPipeline:
             raise
         return summary
 
-    def _process_local_file(self, file_path: Path, summary: RunSummary) -> None:
+    def _process_local_file(self, file_path: Path, summary: RunSummary, known_vendor: str | None = None) -> None:
         """Import a single local file as a document."""
         content_hash = sha256_file(file_path)
 
@@ -117,7 +123,24 @@ class AccountingPipeline:
             return
         summary.attachments_extracted += 1
         # Extract metadata and rename
-        metadata = self.extractor.extract(file_path)
+        if known_vendor:
+            # Vendor is known from fetcher — extract date from filename first
+            from .extraction import find_date
+            detected_date = find_date(file_path.name)
+            if not detected_date:
+                # Fallback to LLM date extraction with targeted prompt
+                detected_date = self.extractor.extract_date_only(file_path)
+            if not detected_date:
+                # Last resort: generic date search in text
+                text = self.extractor._read_text(file_path)
+                detected_date = find_date(text[:5000])
+            metadata = ExtractedMetadata(
+                vendor=known_vendor, date=detected_date,
+                confidence=1.0 if detected_date else 0.9,
+                method="fetcher",
+            )
+        else:
+            metadata = self.extractor.extract(file_path)
         result = rename_document(
             file_path,
             metadata,
@@ -190,15 +213,42 @@ class AccountingPipeline:
     def classify_message(self, message: MailMessage) -> tuple[str, str, str | None]:
         detected_vendor = provider_from_sender_or_url(message.sender)
         rule, rule_vendor = self.repo.classify_by_rules(message.sender, detected_vendor)
+        has_artifacts = self._has_processable_artifacts(message)
         if rule == "ignore":
             return "mail_ignored", "ignored_by_rule", rule_vendor or detected_vendor
         if rule == "always_process":
-            return "mail_auto_selected", "always_process_rule", rule_vendor or detected_vendor
+            if has_artifacts:
+                return "mail_auto_selected", "always_process_rule", rule_vendor or detected_vendor
+            # Known provider without attachments: just a notification hint (badge on fetch)
+            return "mail_provider_hint", "always_process_no_attachment", rule_vendor or detected_vendor
         if any(r.lower().endswith(self.settings.accounting_recipient_suffix) for r in message.recipients):
-            return "mail_auto_selected", "accounting_recipient", detected_vendor
+            if has_artifacts:
+                return "mail_auto_selected", "accounting_recipient", detected_vendor
+            # Check if this vendor has a fetcher — if so, provider hint, not triage
+            vendor_key = normalize_vendor(detected_vendor)
+            if vendor_key and vendor_key in FETCHER_VENDORS:
+                return "mail_provider_hint", "accounting_recipient_no_attachment", detected_vendor
+            return "mail_triage_needed", "accounting_recipient_no_attachment", detected_vendor
         if is_likely_accounting(message):
+            vendor_key = normalize_vendor(detected_vendor)
+            if not has_artifacts and vendor_key:
+                if vendor_key in FETCHER_VENDORS:
+                    # Known fetcher vendor without artifacts → provider hint badge
+                    return "mail_provider_hint", "likely_invoice_known_fetcher", detected_vendor
+                else:
+                    # Unknown vendor without artifacts → suggest as missing provider
+                    return "mail_missing_provider", "likely_invoice_no_fetcher", detected_vendor
             return "mail_triage_needed", "candidate_terms_or_attachments", detected_vendor
         return "mail_ignored", "not_accounting_candidate", detected_vendor
+
+    def _has_processable_artifacts(self, message: MailMessage) -> bool:
+        """Check if message has PDF/image attachments or invoice download links."""
+        for attachment in message.attachments:
+            if Path(attachment.filename).suffix.lower() in DOCUMENT_EXTENSIONS:
+                return True
+        if find_invoice_links(message.body):
+            return True
+        return False
 
     def extract_message_artifacts(self, mail_id: int, message: MailMessage, summary: RunSummary) -> None:
         self.record_attachment_previews(mail_id, message)

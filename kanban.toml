@@ -23,15 +23,6 @@ updated_at = 2026-06-01T13:22:34Z
 tags = []
 
 [[cards]]
-id = '9nfcdz'
-title = 'Gather Orange invoices'
-column = 'todo'
-description = ''
-created_at = 2026-06-01T13:23:16Z
-updated_at = 2026-06-01T13:23:16Z
-tags = []
-
-[[cards]]
 id = 'yj3bno'
 title = 'Gather Spotify invoices'
 column = 'done'
@@ -57,3 +48,42 @@ description = ''
 created_at = 2026-06-01T13:23:16Z
 updated_at = 2026-06-02T08:56:07Z
 tags = []
+
+[[cards]]
+id = '9nfcdz'
+title = 'Gather Orange invoices'
+column = 'done'
+description = ''
+created_at = 2026-06-01T13:23:16Z
+updated_at = 2026-06-02T15:32:13Z
+tags = []
+
+[[cards]]
+id = 'rim932'
+title = 'Gather Free (Freebox/ISP) invoices'
+column = 'done'
+description = ''
+created_at = 2026-06-03T07:24:15Z
+updated_at = 2026-06-03T08:13:13Z
+tags = []
+priority = 'high'
+
+[[cards]]
+id = 'rpl7oa'
+title = 'Gather Engie Pro invoices'
+column = 'done'
+description = ''
+created_at = 2026-06-03T08:14:42Z
+updated_at = 2026-06-03T08:34:58Z
+tags = []
+priority = 'high'
+
+[[cards]]
+id = 'klohn3'
+title = 'OVH invoices fetcher'
+column = 'done'
+description = 'Fetch OVH invoices via their REST API (HMAC-SHA1 signed requests). Needs app key + secret + consumer key. Endpoints: GET /me/bill (list IDs), GET /me/bill/{id} (details+date), download PDF.'
+created_at = 2026-06-03T11:17:41Z
+updated_at = 2026-06-03T11:48:30Z
+tags = ['provider']
+priority = 'high'
