@@ -8,7 +8,7 @@ from .config import Settings
 from .inqom_uploader import InqomUploader
 from .repositories import Repository
 
-INQOM_READY_STATUSES = ("doc_included", "renamed")
+INQOM_READY_STATUSES = ("doc_included",)
 INQOM_DOC_TYPES = {
     "purchase": "SupplierBill",
     "sale": "ClientBill",
