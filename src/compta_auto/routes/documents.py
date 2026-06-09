@@ -396,8 +396,13 @@ async def api_set_output_dir(request: Request, repo: Repository = Depends(get_re
     path = body.get("path", "").strip()
     if not path:
         raise HTTPException(status_code=400, detail="Path is required")
-    repo.set_app_state("output_dir", path)
-    return {"path": path}
+    # Validate path is within user home directory
+    resolved = str(Path(path).expanduser().resolve())
+    home = str(Path.home().resolve())
+    if not (resolved == home or resolved.startswith(home + "/")):
+        raise HTTPException(status_code=403, detail="Output directory must be within your home directory")
+    repo.set_app_state("output_dir", resolved)
+    return {"path": resolved}
 
 
 @router.get("/api/settings/output-dir")

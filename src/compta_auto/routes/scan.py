@@ -71,9 +71,18 @@ def scan_folder(
     if not folder_path.is_dir():
         raise HTTPException(status_code=400, detail=f"Folder not found: {folder}")
     # Reject system paths to prevent scanning sensitive directories
-    _BLOCKED_PREFIXES = ("/etc", "/var", "/usr", "/bin", "/sbin", "/System", "/Library")
-    if any(str(folder_path).startswith(p) for p in _BLOCKED_PREFIXES):
+    _BLOCKED_PREFIXES = (
+        "/etc", "/var", "/usr", "/bin", "/sbin",
+        "/System", "/Library",
+        "/private/etc", "/private/var", "/private/tmp",
+    )
+    resolved = str(folder_path)
+    if any(resolved == p or resolved.startswith(p + "/") for p in _BLOCKED_PREFIXES):
         raise HTTPException(status_code=403, detail="Scanning system directories is not allowed")
+    # Only allow paths under user home directory
+    home = str(Path.home().resolve())
+    if not (resolved == home or resolved.startswith(home + "/")):
+        raise HTTPException(status_code=403, detail="Only paths within your home directory are allowed")
 
     # Compute max_age_days before entering the generator
     if timespan == "since_last":
