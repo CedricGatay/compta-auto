@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     use_apple_llm: bool = True
     inqom_email: str | None = None
     inqom_password: str | None = None
-    inqom_client_id: str = "INQOM_CLIENT_ID_PLACEHOLDER"
+    inqom_client_id: str = ""
     inqom_fiscal_year_start_month: int = 8
 
     @property

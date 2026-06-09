@@ -34,7 +34,7 @@ class InqomUploader:
         self,
         email: str,
         password: str,
-        client_id: str = "INQOM_CLIENT_ID_PLACEHOLDER",
+        client_id: str = "",
         state_dir: Path = Path("data"),
         headless: bool = True,
     ):
