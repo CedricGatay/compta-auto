@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     renamed_dir: Path = Field(default=Path("data/renamed"))
     output_dir: Path = Field(default=Path("data/output"))
     scan_folder: str | None = None
-    accounting_domain: str = "ACCOUNTING_DOMAIN_PLACEHOLDER"
+    accounting_domain: str = ""
     min_rename_confidence: float = 0.82
     llm_extractor_command: str | None = None
     openai_api_key: str | None = None
@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     inqom_password: str | None = None
     inqom_client_id: str = ""
     inqom_fiscal_year_start_month: int = 8
+    sale_vendor_markers: str = ""  # comma-separated list of vendor keywords indicating sale invoices
 
     @property
     def accounting_recipient_suffix(self) -> str:
