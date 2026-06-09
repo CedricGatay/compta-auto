@@ -23,6 +23,16 @@ updated_at = 2026-06-01T13:22:34Z
 tags = []
 
 [[cards]]
+id = 'keb1fm'
+title = 'Add optional Google Mail API backend (multi-account)'
+column = 'todo'
+description = 'Allow configuring Google Mail API as an alternative to Spark CLI for mail ingestion. Support multiple accounts. Should be opt-in via configuration (e.g. COMPTA_MAIL_BACKEND=gmail). Requires OAuth2 credentials and token storage.'
+created_at = 2026-06-09T13:46:43Z
+updated_at = 2026-06-09T13:46:43Z
+tags = ['feature', 'mail']
+priority = 'medium'
+
+[[cards]]
 id = 'yj3bno'
 title = 'Gather Spotify invoices'
 column = 'done'
