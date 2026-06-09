@@ -35,7 +35,7 @@ def make_repo(settings: Settings) -> Repository:
     return Repository(conn)
 
 
-def test_DOMAIN_PLACEHOLDER_recipient_is_auto_processed_and_renamed(tmp_path: Path) -> None:
+def test_accounting_domain_recipient_is_auto_processed_and_renamed(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
     source = tmp_path / "openai_invoice_2026-05-29.pdf"
     source.write_text("invoice from OpenAI\nDate: 2026-05-29")
@@ -62,7 +62,7 @@ def test_DOMAIN_PLACEHOLDER_recipient_is_auto_processed_and_renamed(tmp_path: Pa
         repo.conn.close()
 
 
-def test_non_DOMAIN_PLACEHOLDER_candidate_goes_to_triage(tmp_path: Path) -> None:
+def test_non_accounting_domain_candidate_goes_to_triage(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
     attachment = tmp_path / "spotify_invoice.pdf"
     attachment.write_text("invoice")
@@ -264,7 +264,7 @@ def test_existing_blank_mail_metadata_is_refreshed_on_rerun(tmp_path: Path) -> N
 
         mail = repo.list_mails()[0]
         assert mail["sender"] == "billing@openai.com"
-        assert mail["recipients_display"] == "accounting@ACCOUNTING_DOMAIN_PLACEHOLDER"
+        assert mail["recipients_display"] == "accounting@accounting_domain_placeholder"
         assert mail["subject"] == "Invoice 2026-05-29"
         assert mail["detected_vendor"] == "openai"
     finally:
@@ -317,7 +317,7 @@ def test_document_rows_include_source_and_supposed_filename(tmp_path: Path) -> N
 
         document = repo.list_documents()[0]
         assert document["source_from_display"] == "billing@openai.com"
-        assert document["source_to_display"] == "accounting@ACCOUNTING_DOMAIN_PLACEHOLDER"
+        assert document["source_to_display"] == "accounting@accounting_domain_placeholder"
         assert document["supposed_filename"] == "2026_05_29_openai.pdf"
         assert document["preview_kind"] == "pdf"
         assert document["raw_preview_url"].endswith(".pdf")

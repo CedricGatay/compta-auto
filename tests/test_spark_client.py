@@ -5,7 +5,7 @@ def test_parse_thread_output_accepts_markdown_headers() -> None:
     output = """
 ### Message 12345
 **From:** Billing <billing@openai.com>
-**To:** Accounting <accounting@ACCOUNTING_DOMAIN_PLACEHOLDER>, Me <me@example.com>
+**To:** Accounting <accounting@accounting.example.com>, Me <me@example.com>
 **Subject:** Your invoice
 **Date:** 2026-05-29
 
@@ -20,7 +20,7 @@ Attachments:
 
     assert len(messages) == 1
     assert messages[0].sender == "billing@openai.com"
-    assert messages[0].recipients == ["accounting@ACCOUNTING_DOMAIN_PLACEHOLDER", "me@example.com"]
+    assert messages[0].recipients == ["accounting@accounting.example.com", "me@example.com"]
     assert messages[0].subject == "Your invoice"
     assert messages[0].attachments[0].filename == "invoice_2026-05-29.pdf"
 

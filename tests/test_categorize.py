@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -11,15 +13,22 @@ from compta_auto.pipeline import AccountingPipeline
 from compta_auto.repositories import Repository
 from compta_auto.services.fetch_service import auto_categorize_document
 
+TEST_SALE_MARKERS = "testsale,othersale"
+
+
+@pytest.fixture(autouse=True)
+def _set_test_sale_markers(monkeypatch):
+    """Override sale markers for tests to avoid depending on .env."""
+    monkeypatch.setenv("COMPTA_SALE_VENDOR_MARKERS", TEST_SALE_MARKERS)
+
 
 @pytest.mark.parametrize(
     ("detected_vendor", "expected"),
     [
-        ("SALE_MARKER_1.com", "sale"),
-        ("ClientA.com", "sale"),
-        ("SALE_MARKER_2", "sale"),
-        ("ClientB", "sale"),
-        ("ClientB", "sale"),
+        ("testsale corp", "sale"),
+        ("TESTSALE Inc", "sale"),
+        ("othersale", "sale"),
+        ("OtherSale Ltd", "sale"),
         ("openai", "purchase"),
         (None, "purchase"),
     ],
@@ -44,7 +53,7 @@ def test_categorize_uncategorized_documents_updates_existing_rows() -> None:
         status="attachment_extracted",
     )
     repo.update_document_metadata(
-        sale_doc_id, "SALE_MARKER_1.com", "2026-06-09", 0.95, "test", "rename_needed"
+        sale_doc_id, "testsale corp", "2026-06-09", 0.95, "test", "rename_needed"
     )
 
     purchase_doc_id, _ = repo.add_document(
@@ -66,6 +75,7 @@ def test_categorize_uncategorized_documents_updates_existing_rows() -> None:
         renamed_dir=Path("data/renamed"),
         output_dir=Path("data/output"),
         use_apple_llm=False,
+        sale_vendor_markers=TEST_SALE_MARKERS,
     )
     pipeline = AccountingPipeline(settings, repo, spark=object(), extractor=object())
 
