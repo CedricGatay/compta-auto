@@ -74,7 +74,17 @@ def provider_from_sender_or_url(sender: str, url: str | None = None) -> str:
         candidate = parts[i]
         if candidate in VENDOR_ALIASES:
             return VENDOR_ALIASES[candidate]
+    # Skip generic subdomains (email, noreply, billing, etc.) and use brand domain
     vendor = parts[0]
+    if vendor in _GENERIC_SUBDOMAINS and len(parts) >= 3:
+        vendor = parts[-2]
     resolved = VENDOR_ALIASES.get(vendor) or normalize_vendor(vendor) or vendor
     return resolved
+
+
+_GENERIC_SUBDOMAINS = frozenset({
+    "email", "mail", "noreply", "no-reply", "billing", "support", "info",
+    "newsletter", "notifications", "accounts", "contact", "service",
+    "messages", "alert", "alerts", "news", "updates",
+})
 

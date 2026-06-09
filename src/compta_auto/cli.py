@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import signal
+import sys
 
 import uvicorn
 
@@ -28,13 +30,43 @@ def main() -> None:
     provider.add_argument("--url", required=True)
     provider.add_argument("--notes", default="")
 
+    inqom_explore = subparsers.add_parser("inqom-explore", help="Explore Inqom UI interactively")
+
     args = parser.parse_args()
     settings = get_settings()
+
+    if args.command == "inqom-explore":
+        from .inqom_uploader import explore_inqom_ui
+        if not settings.inqom_email or not settings.inqom_password:
+            print("Error: Set COMPTA_INQOM_EMAIL and COMPTA_INQOM_PASSWORD in .env")
+            sys.exit(1)
+        explore_inqom_ui(settings.inqom_email, settings.inqom_password)
+        return
+
     db = Database(settings.db_path)
     db.init()
 
     if args.command == "web":
-        uvicorn.run(create_app(settings), host=args.host, port=args.port)
+        # Force immediate exit on second CTRL+C
+        original_sigint = signal.getsignal(signal.SIGINT)
+
+        def _force_exit(*_args):
+            sys.exit(0)
+
+        def _first_sigint(*_args):
+            signal.signal(signal.SIGINT, _force_exit)
+            if callable(original_sigint) and original_sigint is not signal.SIG_DFL:
+                original_sigint(*_args)
+            else:
+                raise KeyboardInterrupt
+
+        signal.signal(signal.SIGINT, _first_sigint)
+        uvicorn.run(
+            create_app(settings),
+            host=args.host,
+            port=args.port,
+            timeout_graceful_shutdown=0,
+        )
         return
 
     with db.connect() as conn:

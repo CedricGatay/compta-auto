@@ -10,22 +10,15 @@ import urllib.request
 from pathlib import Path
 from typing import Generator
 
+from .providers.base import AuthError, build_opener
+
 
 FREEBOX_LOGIN_URL = "https://subscribe.free.fr/login/do_login.pl"
 ADSL_BASE = "https://adsl.free.fr"
 
 
-class AuthError(Exception):
-    """Raised when authentication fails."""
-
-
 def _build_opener() -> tuple[urllib.request.OpenerDirector, http.cookiejar.CookieJar]:
-    cj = http.cookiejar.CookieJar()
-    opener = urllib.request.build_opener(
-        urllib.request.HTTPCookieProcessor(cj),
-        urllib.request.HTTPRedirectHandler(),
-    )
-    return opener, cj
+    return build_opener()
 
 
 def login(username: str, password: str) -> tuple[urllib.request.OpenerDirector, str, str]:

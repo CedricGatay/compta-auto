@@ -11,11 +11,9 @@ import urllib.request
 from pathlib import Path
 from typing import Generator
 
+from .providers.base import AuthError
+
 OVH_API_BASE = "https://eu.api.ovh.com/1.0"
-
-
-class AuthError(Exception):
-    """Raised when authentication fails."""
 
 
 def _get_server_time() -> int:

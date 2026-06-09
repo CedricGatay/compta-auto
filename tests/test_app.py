@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from compta_auto.app import document_file_response, preview_file_response
+from compta_auto.routes.documents import _document_file_response as document_file_response, _preview_file_response as preview_file_response
 
 
 def test_document_preview_is_served_inline(tmp_path: Path) -> None:

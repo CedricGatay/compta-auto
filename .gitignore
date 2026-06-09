@@ -10,6 +10,9 @@ build/
 
 # Data (runtime state, not source)
 data/
+.compta_key
+compta.db
+raw_documents/
 
 # IDE
 .idea/
@@ -26,3 +29,4 @@ htmlcov/
 
 # Swift build artifacts
 tools/apple-extractor/.build/
+.env

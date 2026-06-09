@@ -12,18 +12,14 @@ import base64
 from pathlib import Path
 from typing import Generator
 
+from .providers.base import AuthError, build_opener, serialize_cookies, restore_cookies
+
 FREE_MOBILE_BASE = "https://mobile.free.fr/account/v2"
 SEND_MAIL_ACTION_ID = "7fdbd72cf9658e42cc86a2a6059a70d7c600a44b05"
 
 
-class AuthError(Exception):
-    """Raised when authentication fails."""
-
-
 def _build_opener() -> tuple[urllib.request.OpenerDirector, http.cookiejar.CookieJar]:
-    cj = http.cookiejar.CookieJar()
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
-    return opener, cj
+    return build_opener()
 
 
 def _get_csrf_token(opener: urllib.request.OpenerDirector) -> str:
@@ -54,31 +50,11 @@ def _get_csrf_token(opener: urllib.request.OpenerDirector) -> str:
 
 
 def _serialize_cookies(cj: http.cookiejar.CookieJar) -> str:
-    """Serialize cookie jar to a JSON string for storage between steps."""
-    cookies = []
-    for c in cj:
-        cookies.append({
-            "name": c.name,
-            "value": c.value,
-            "domain": c.domain,
-            "path": c.path,
-        })
-    return json.dumps(cookies)
+    return serialize_cookies(cj)
 
 
 def _restore_cookies(opener: urllib.request.OpenerDirector, cj: http.cookiejar.CookieJar, serialized: str):
-    """Restore cookies from serialized JSON string."""
-    cookies = json.loads(serialized)
-    for c in cookies:
-        cookie = http.cookiejar.Cookie(
-            version=0, name=c["name"], value=c["value"],
-            port=None, port_specified=False,
-            domain=c["domain"], domain_specified=True, domain_initial_dot=c["domain"].startswith("."),
-            path=c["path"], path_specified=True,
-            secure=True, expires=None, discard=True,
-            comment=None, comment_url=None, rest={},
-        )
-        cj.set_cookie(cookie)
+    restore_cookies(cj, serialized)
 
 
 def login(username: str, password: str) -> tuple[str, str, int]:

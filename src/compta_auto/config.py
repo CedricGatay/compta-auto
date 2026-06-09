@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
     use_apple_llm: bool = True
+    inqom_email: str | None = None
+    inqom_password: str | None = None
+    inqom_client_id: str = "INQOM_CLIENT_ID_PLACEHOLDER"
 
     @property
     def accounting_recipient_suffix(self) -> str:

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import Settings
-from .extraction import MetadataExtractor
+from .extraction import MetadataExtractor, extract_fetcher_metadata
 from .files import sha256_file, write_attachment
 from .links import find_invoice_links, provider_from_sender_or_url
 from .models import (
@@ -124,21 +124,7 @@ class AccountingPipeline:
         summary.attachments_extracted += 1
         # Extract metadata and rename
         if known_vendor:
-            # Vendor is known from fetcher — extract date from filename first
-            from .extraction import find_date
-            detected_date = find_date(file_path.name)
-            if not detected_date:
-                # Fallback to LLM date extraction with targeted prompt
-                detected_date = self.extractor.extract_date_only(file_path)
-            if not detected_date:
-                # Last resort: generic date search in text
-                text = self.extractor._read_text(file_path)
-                detected_date = find_date(text[:5000])
-            metadata = ExtractedMetadata(
-                vendor=known_vendor, date=detected_date,
-                confidence=1.0 if detected_date else 0.9,
-                method="fetcher",
-            )
+            metadata = extract_fetcher_metadata(file_path, known_vendor, self.extractor)
         else:
             metadata = self.extractor.extract(file_path)
         result = rename_document(
@@ -219,8 +205,11 @@ class AccountingPipeline:
         if rule == "always_process":
             if has_artifacts:
                 return "mail_auto_selected", "always_process_rule", rule_vendor or detected_vendor
-            # Known provider without attachments: just a notification hint (badge on fetch)
-            return "mail_provider_hint", "always_process_no_attachment", rule_vendor or detected_vendor
+            # Only hint if vendor has a configured fetcher; otherwise triage
+            vendor_key = normalize_vendor(rule_vendor or detected_vendor)
+            if vendor_key and vendor_key in FETCHER_VENDORS:
+                return "mail_provider_hint", "always_process_no_attachment", rule_vendor or detected_vendor
+            return "mail_triage_needed", "always_process_no_attachment", rule_vendor or detected_vendor
         if any(r.lower().endswith(self.settings.accounting_recipient_suffix) for r in message.recipients):
             if has_artifacts:
                 return "mail_auto_selected", "accounting_recipient", detected_vendor

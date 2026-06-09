@@ -10,12 +10,10 @@ import urllib.request
 from pathlib import Path
 from typing import Generator
 
+from .providers.base import AuthError
+
 CHATGPT_BACKEND = "https://chatgpt.com/backend-api"
 STRIPE_API_VERSION = "2026-04-22.dahlia"
-
-
-class AuthError(Exception):
-    """Raised when authentication fails."""
 
 
 def _get_portal_session_url(bearer_token: str) -> str:

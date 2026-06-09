@@ -316,15 +316,22 @@ class Repository:
                 int(existing["id"]), source_type, source_id, original_filename, content_hash
             )
             return int(existing["id"]), False
-        cur = self.conn.execute(
-            """
-            INSERT INTO documents(
-                source_type, source_id, original_filename, raw_path, content_hash, mime_type, status
+        try:
+            cur = self.conn.execute(
+                """
+                INSERT INTO documents(
+                    source_type, source_id, original_filename, raw_path, content_hash, mime_type, status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (source_type, source_id, original_filename, raw_path, content_hash, mime_type, status),
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (source_type, source_id, original_filename, raw_path, content_hash, mime_type, status),
-        )
+        except Exception:
+            # Race condition: another insert happened between check and insert
+            existing = self.get_document_by_hash(content_hash)
+            if existing:
+                return int(existing["id"]), False
+            raise
         return int(cur.lastrowid), True
 
     def add_duplicate_source(
@@ -383,6 +390,17 @@ class Repository:
             WHERE id = ?
             """,
             (status, document_id),
+        )
+
+    def update_document_accounting_type(self, document_id: int, accounting_type: str) -> None:
+        """Set accounting type: 'purchase' (facture d'achat) or 'sale' (facture de vente)."""
+        self.conn.execute(
+            """
+            UPDATE documents
+            SET accounting_type = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (accounting_type, document_id),
         )
 
     def delete_document(self, document_id: int) -> None:
@@ -488,14 +506,20 @@ class Repository:
             (key, value),
         )
 
+    def delete_app_state(self, key: str) -> None:
+        self.conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
+
     def reset_all(self) -> None:
-        """Delete all data except vendor_rules. Keeps whitelist/blacklist intact."""
+        """Delete all data except vendor_rules and credentials."""
         self.conn.execute("DELETE FROM duplicate_sources")
         self.conn.execute("DELETE FROM documents")
         self.conn.execute("DELETE FROM mail_attachments")
         self.conn.execute("DELETE FROM provider_tasks")
         self.conn.execute("DELETE FROM mails")
         self.conn.execute("DELETE FROM runs")
+        self.conn.execute(
+            "DELETE FROM app_state WHERE key LIKE 'last_fetch_%' OR key LIKE 'last_scan_%'"
+        )
 
     def purge_all(self) -> None:
         """Delete ALL data except stored credentials (app_state keys starting with 'cred_')."""
@@ -507,6 +531,16 @@ class Repository:
         self.conn.execute("DELETE FROM runs")
         self.conn.execute("DELETE FROM vendor_rules")
         self.conn.execute("DELETE FROM app_state WHERE key NOT LIKE 'cred_%'")
+
+    def purge_mails(self) -> None:
+        """Delete only mail scan data. Documents and rules are kept."""
+        self.conn.execute("DELETE FROM mail_attachments")
+        self.conn.execute("DELETE FROM provider_tasks")
+        self.conn.execute("DELETE FROM mails")
+        self.conn.execute("DELETE FROM runs")
+        self.conn.execute(
+            "DELETE FROM app_state WHERE key LIKE 'last_scan_%'"
+        )
 
 
 def enrich_mail(row: dict[str, Any], attachments: list[dict[str, Any]] | None = None) -> dict[str, Any]:

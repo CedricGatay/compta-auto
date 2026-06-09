@@ -254,11 +254,205 @@ class MetadataExtractor:
             return None
 
         client = OpenAI(api_key=self.openai_api_key)
+        messages = self._build_openai_messages(path, text, mail_subject, sender)
+
+        try:
+            response = client.chat.completions.create(
+                model=self.openai_model,
+                messages=messages,
+                temperature=0.1,
+                max_tokens=200,
+            )
+            return self._parse_openai_response(response.choices[0].message.content or "")
+        except Exception:
+            return None
+
+    async def async_extract(self, path: Path, mail_subject: str = "", sender: str = "") -> ExtractedMetadata:
+        """Async version of extract() — uses AsyncOpenAI for LLM calls."""
+        text = self._read_text(path)
+        if self.has_llm:
+            try:
+                llm = await self._async_llm_extract(path, text, mail_subject, sender)
+                if llm and llm.vendor:
+                    return llm
+            except Exception:
+                pass
+        return heuristic_extract(path, text, mail_subject, sender)
+
+    async def async_extract_date_only(self, path: Path) -> str | None:
+        """Async version of extract_date_only()."""
+        text = self._read_text(path)
+        if not text.strip():
+            return None
+        if self.openai_api_key:
+            return await self._async_openai_extract_date(text)
+        if self._apple_available:
+            return await self._async_apple_extract_date(path, text)
+        return None
+
+    async def _async_llm_extract(
+        self, path: Path, text: str, mail_subject: str, sender: str
+    ) -> ExtractedMetadata | None:
+        if self.openai_api_key:
+            return await self._async_openai_extract(path, text, mail_subject, sender)
+        if self._apple_available:
+            return await self._async_apple_extract(path, text, mail_subject, sender)
+        if self.llm_command:
+            return await self._async_command_extract(path)
+        return None
+
+    async def _async_openai_extract(
+        self, path: Path, text: str, mail_subject: str, sender: str
+    ) -> ExtractedMetadata | None:
+        try:
+            from openai import AsyncOpenAI
+        except ImportError:
+            return None
+
+        client = AsyncOpenAI(api_key=self.openai_api_key)
+        messages = self._build_openai_messages(path, text, mail_subject, sender)
+
+        try:
+            response = await client.chat.completions.create(
+                model=self.openai_model,
+                messages=messages,
+                temperature=0.1,
+                max_tokens=200,
+            )
+            return self._parse_openai_response(response.choices[0].message.content or "")
+        except Exception:
+            return None
+
+    async def _async_openai_extract_date(self, text: str) -> str | None:
+        try:
+            from openai import AsyncOpenAI
+        except ImportError:
+            return None
+        client = AsyncOpenAI(api_key=self.openai_api_key)
+        messages: list[dict] = [
+            {"role": "system", "content": OPENAI_DATE_EXTRACTION_PROMPT},
+            {"role": "user", "content": f"Document text:\n{text[:4000]}"},
+        ]
+        try:
+            response = await client.chat.completions.create(
+                model=self.openai_model,
+                messages=messages,
+                temperature=0.0,
+                max_tokens=50,
+            )
+            raw = response.choices[0].message.content or ""
+            json_match = re.search(r"\{[^}]+\}", raw)
+            if not json_match:
+                return None
+            payload = json.loads(json_match.group(0))
+            return payload.get("date")
+        except Exception:
+            return None
+
+    async def _async_apple_extract(
+        self, path: Path, text: str, mail_subject: str, sender: str
+    ) -> ExtractedMetadata | None:
+        """Async version of _apple_extract using asyncio subprocess."""
+        import asyncio
+
+        vendor_hint = ""
+        if sender and "@" in sender:
+            domain = sender.split("@")[-1].strip(">").lower()
+            parts = domain.split(".")
+            if len(parts) >= 2:
+                vendor_hint = parts[-2].upper()
+
+        context_parts: list[str] = []
+        if vendor_hint:
+            context_parts.append(f"VENDOR_NAME: {vendor_hint}")
+        if sender:
+            context_parts.append(f"Sender email: {sender}")
+        if mail_subject:
+            context_parts.append(f"Mail subject: {mail_subject}")
+        context = "\n".join(context_parts) if context_parts else ""
+
+        args = [str(APPLE_EXTRACTOR_PATH), str(path)]
+        if context:
+            args.append(context)
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+            if proc.returncode != 0:
+                return None
+            payload = json.loads(stdout.decode())
+        except Exception:
+            return None
+
+        vendor = payload.get("vendor")
+        date_val = payload.get("date")
+        confidence = float(payload.get("confidence", 0))
+        if not vendor and not date_val:
+            return None
+        if vendor and date_val:
+            confidence = max(confidence, 0.9)
+        elif vendor:
+            confidence = max(confidence, 0.5)
+        return ExtractedMetadata(
+            vendor=vendor, date=date_val, confidence=confidence, method="apple_llm",
+        )
+
+    async def _async_apple_extract_date(self, path: Path, text: str) -> str | None:
+        """Async version of _apple_extract_date."""
+        import asyncio
+
+        args = [str(APPLE_EXTRACTOR_PATH), str(path), f"EXTRACT_DATE_ONLY: {OPENAI_DATE_EXTRACTION_PROMPT}"]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+            if proc.returncode != 0:
+                return None
+            payload = json.loads(stdout.decode())
+            return payload.get("date")
+        except Exception:
+            return None
+
+    async def _async_command_extract(self, path: Path) -> ExtractedMetadata | None:
+        """Async version of _command_extract."""
+        import asyncio
+
+        if not self.llm_command:
+            return None
+        cmd = [*self.llm_command.split(), str(path)]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=60)
+            if proc.returncode != 0:
+                return None
+            payload = json.loads(stdout.decode())
+        except Exception:
+            return None
+        return ExtractedMetadata(
+            vendor=payload.get("vendor"),
+            date=payload.get("date"),
+            confidence=float(payload.get("confidence", 0)),
+            method="llm",
+        )
+
+    def _build_openai_messages(
+        self, path: Path, text: str, mail_subject: str, sender: str
+    ) -> list[dict]:
+        """Build the OpenAI messages list (shared between sync and async)."""
         messages: list[dict] = [{"role": "system", "content": OPENAI_EXTRACTION_PROMPT}]
 
-        # Build context from available text
         context_parts = []
-        # Derive vendor hint from sender domain
         if sender and "@" in sender:
             domain = sender.split("@")[-1].strip(">").lower()
             domain_parts = domain.split(".")
@@ -271,7 +465,6 @@ class MetadataExtractor:
         if text.strip():
             context_parts.append(f"Document text:\n{text[:4000]}")
 
-        # For images, include the image directly via vision
         suffix = path.suffix.lower()
         if suffix in {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}:
             content: list[dict] = []
@@ -290,22 +483,17 @@ class MetadataExtractor:
             user_text = "\n".join(context_parts) if context_parts else f"Filename: {path.name}"
             messages.append({"role": "user", "content": user_text})
 
-        try:
-            response = client.chat.completions.create(
-                model=self.openai_model,
-                messages=messages,
-                temperature=0.1,
-                max_tokens=200,
-            )
-            raw = response.choices[0].message.content or ""
-            # Extract JSON from response (handle markdown code blocks)
-            json_match = re.search(r"\{[^}]+\}", raw)
-            if not json_match:
-                return None
-            payload = json.loads(json_match.group(0))
-        except Exception:
-            return None
+        return messages
 
+    def _parse_openai_response(self, raw: str) -> ExtractedMetadata | None:
+        """Parse OpenAI response JSON (shared between sync and async)."""
+        json_match = re.search(r"\{[^}]+\}", raw)
+        if not json_match:
+            return None
+        try:
+            payload = json.loads(json_match.group(0))
+        except (json.JSONDecodeError, ValueError):
+            return None
         return ExtractedMetadata(
             vendor=payload.get("vendor"),
             date=payload.get("date"),
@@ -402,3 +590,69 @@ def vendor_from_filename(path: Path) -> str | None:
     # Strip long standalone numbers (10+ digits, likely IDs not vendor names)
     stem = re.sub(r"\d{10,}", "", stem)
     return normalize_vendor(stem)
+
+
+# Known vendor prefixes from fetchers — shared between pipeline and re-rename
+FETCHER_PREFIXES: dict[str, str] = {
+    "spotify": "spotify",
+    "openai": "openai",
+    "free_mobile": "free_mobile",
+    "orange": "orange",
+    "sosh": "sosh",
+    "freebox": "freebox",
+    "ovh": "ovh",
+    "engie_pro": "engie",
+    "engie": "engie",
+}
+
+
+def detect_fetcher_vendor(filename: str) -> str | None:
+    """If the filename matches a known fetcher prefix, return the vendor."""
+    lower = filename.lower()
+    for prefix, vendor in sorted(FETCHER_PREFIXES.items(), key=lambda x: -len(x[0])):
+        if lower.startswith(prefix + "_") or lower.startswith(prefix + "."):
+            return vendor
+    return None
+
+
+def extract_fetcher_metadata(
+    file_path: Path,
+    known_vendor: str,
+    extractor: "MetadataExtractor",
+) -> ExtractedMetadata:
+    """Extract metadata for a file with a known vendor (from fetcher).
+
+    Uses filename-first date extraction, then LLM, then text scan.
+    """
+    detected_date = find_date(file_path.name)
+    if not detected_date:
+        detected_date = extractor.extract_date_only(file_path)
+    if not detected_date:
+        text = extractor._read_text(file_path)
+        detected_date = find_date(text[:5000])
+    return ExtractedMetadata(
+        vendor=known_vendor,
+        date=detected_date,
+        confidence=1.0 if detected_date else 0.9,
+        method="fetcher",
+    )
+
+
+async def async_extract_fetcher_metadata(
+    file_path: Path,
+    known_vendor: str,
+    extractor: "MetadataExtractor",
+) -> ExtractedMetadata:
+    """Async version of extract_fetcher_metadata."""
+    detected_date = find_date(file_path.name)
+    if not detected_date:
+        detected_date = await extractor.async_extract_date_only(file_path)
+    if not detected_date:
+        text = extractor._read_text(file_path)
+        detected_date = find_date(text[:5000])
+    return ExtractedMetadata(
+        vendor=known_vendor,
+        date=detected_date,
+        confidence=1.0 if detected_date else 0.9,
+        method="fetcher",
+    )

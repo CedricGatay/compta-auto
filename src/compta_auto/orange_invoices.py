@@ -12,6 +12,8 @@ import uuid
 from pathlib import Path
 from typing import Generator
 
+from .providers.base import AuthError
+
 
 LOGIN_URL = "https://login.orange.fr"
 EC_BASE = "https://espace-client.orange.fr"
@@ -23,10 +25,6 @@ _API_HEADERS = {
     "X-App-Device-Type": "desktop",
     "Accept": "application/json",
 }
-
-
-class AuthError(Exception):
-    """Raised when authentication fails."""
 
 
 def _launch_and_login(username: str, password: str):

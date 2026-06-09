@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS documents (
     final_filename TEXT,
     final_path TEXT,
     extraction_method TEXT,
+    accounting_type TEXT,
     canonical_document_id INTEGER REFERENCES documents(id),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -121,6 +122,19 @@ class Database:
     def init(self) -> None:
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            # Migrations for existing databases
+            self._migrate(conn)
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        """Run safe ALTER TABLE migrations for columns added after initial schema."""
+        migrations = [
+            "ALTER TABLE documents ADD COLUMN accounting_type TEXT",
+        ]
+        for sql in migrations:
+            try:
+                conn.execute(sql)
+            except sqlite3.OperationalError:
+                pass  # Column already exists
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
