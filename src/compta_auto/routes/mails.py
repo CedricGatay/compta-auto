@@ -118,6 +118,7 @@ def mail_to_pdf_route(
     from ..links import provider_from_sender_or_url
     from ..normalize import normalize_vendor
     from ..renamer import rename_document
+    from ..services.categorize import auto_categorize_document
 
     mail = repo.get_mail(mail_id)
     if not mail:
@@ -182,6 +183,11 @@ def mail_to_pdf_route(
         repo.update_document_metadata(
             doc_id, metadata.vendor, metadata.date,
             metadata.confidence, metadata.method, "rename_review_needed",
+        )
+    document = repo.get_document(doc_id)
+    if document and not document.get("accounting_type"):
+        repo.update_document_accounting_type(
+            doc_id, auto_categorize_document({"detected_vendor": metadata.vendor})
         )
 
     repo.update_mail_status(mail_id, "mail_auto_selected")

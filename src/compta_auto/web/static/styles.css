@@ -614,6 +614,15 @@ main {
 .badge-info { background: var(--color-info-subtle); color: var(--color-info); }
 .badge-vendor { background: #ede9fe; color: #5b21b6; }
 .badge-subtle { background: var(--color-border-light); color: var(--color-text-secondary); }
+.accounting-type-badge {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.accounting-type-purchase { background: #dcfce7; color: #166534; }
+.accounting-type-sale { background: #dbeafe; color: #1d4ed8; }
+.accounting-type-unknown { background: var(--color-border-light); color: var(--color-text-secondary); }
 
 /* === BUTTONS === */
 .btn {
@@ -809,6 +818,19 @@ input[type="password"] { font-family: monospace; }
   width: 100px;
 }
 .doc-triage-actions .rename-form input[type="date"] { width: 125px; }
+.accounting-type-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.accounting-type-select {
+  min-width: 132px;
+  padding: 4px 8px;
+  min-height: 28px;
+  font-size: 0.75rem;
+}
 
 /* === KANBAN BOARD === */
 .doc-kanban-section { margin-top: 1.5rem; }
@@ -1700,6 +1722,7 @@ button.preview { color: inherit; cursor: pointer; padding: 0; }
   gap: 4px;
   align-items: center;
 }
+#inqom-upload-result { margin-top: 12px; }
 
 /* === PDF PREVIEW MODAL === */
 .pdf-preview-modal {

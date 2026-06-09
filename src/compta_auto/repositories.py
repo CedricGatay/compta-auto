@@ -403,6 +403,18 @@ class Repository:
             (accounting_type, document_id),
         )
 
+    def list_uncategorized_documents(self) -> list[dict[str, Any]]:
+        return rows_to_dicts(
+            self.conn.execute(
+                """
+                SELECT id, detected_vendor
+                FROM documents
+                WHERE accounting_type IS NULL OR accounting_type = ''
+                ORDER BY id
+                """
+            )
+        )
+
     def delete_document(self, document_id: int) -> None:
         """Permanently dismiss a document (marked so it won't reappear in the UI)."""
         self.conn.execute(

@@ -19,8 +19,11 @@ from ..config import Settings
 from ..pipeline import AccountingPipeline
 from ..providers.base import AuthError
 from ..repositories import Repository
+from .categorize import auto_categorize_document
 
 logger = logging.getLogger(__name__)
+
+__all__ = ["auto_categorize_document", "run_provider_fetch"]
 
 
 def _set_accounting_type_on_recent(repo: Repository, vendor: str, accounting_type: str) -> None:

@@ -547,7 +547,8 @@ let fetchInProgress = false;
 let fetchInProgressProvider = "";
 const ALL_FETCH_BTNS = [
   "fetch-spotify-btn", "fetch-chatgpt-btn", "fetch-free-login-btn", "fetch-free-otp-btn", "fetch-free-auto-btn",
-  "fetch-orange-btn", "fetch-sosh-btn", "fetch-freebox-btn", "fetch-ovh-btn", "fetch-engie-login-btn", "fetch-engie-otp-btn", "fetch-engie-auto-btn"
+  "fetch-orange-btn", "fetch-sosh-btn", "fetch-freebox-btn", "fetch-ovh-btn", "fetch-engie-login-btn", "fetch-engie-otp-btn", "fetch-engie-auto-btn",
+  "inqom-upload-btn"
 ];
 
 function acquireFetchLock(providerName) {
@@ -606,7 +607,7 @@ function readProviderSSE(resp, resultDiv, { credFields, badgeId, editBtnId, onCo
         } else if (event.type === "status") {
           resultDiv.innerHTML = `<span>⏳ ${event.message}</span>`;
         } else if (event.type === "complete") {
-          const r = event.result;
+          const r = event.result || event;
           resultDiv.className = "fetch-result fetch-result-success";
           if (onComplete) {
             onComplete(r, resultDiv);
@@ -1032,22 +1033,32 @@ if (engieAutoBtn) {
 }
 
 // === Export tab ===
-const exportAllBtn = document.getElementById("export-all-btn");
-const exportOutputPath = document.getElementById("export-output-path");
-const exportChangeDirBtn = document.getElementById("export-change-dir-btn");
-const exportResult = document.getElementById("export-result");
-
-// Load output dir
-if (exportOutputPath) {
+function loadExportOutputPath() {
+  const exportOutputPath = document.getElementById("export-output-path");
+  if (!exportOutputPath) return;
   fetch("/api/settings/output-dir")
     .then((r) => r.json())
     .then((data) => { exportOutputPath.textContent = data.path; })
     .catch(() => {});
 }
 
-// Change output dir
-if (exportChangeDirBtn) {
-  exportChangeDirBtn.addEventListener("click", async () => {
+loadExportOutputPath();
+
+function formatInqomComplete(result, resultDiv) {
+  const parts = [];
+  if (result.message) parts.push(result.message);
+  if (typeof result.uploaded === "number") parts.push(`✅ Uploaded ${result.uploaded} document(s)`);
+  if (typeof result.skipped === "number" && result.skipped > 0) parts.push(`⏭ ${result.skipped} skipped`);
+  if (typeof result.failed === "number" && result.failed > 0) parts.push(`⚠️ ${result.failed} failed`);
+  if (Array.isArray(result.errors) && result.errors.length > 0) parts.push(`⚠️ ${result.errors.length} error(s)`);
+  if (!parts.length) parts.push("Upload complete.");
+  resultDiv.innerHTML = parts.join("<br>");
+}
+
+document.addEventListener("click", async (e) => {
+  const changeDirBtn = e.target.closest("#export-change-dir-btn");
+  if (changeDirBtn) {
+    const exportOutputPath = document.getElementById("export-output-path");
     const current = exportOutputPath?.textContent || "";
     const newPath = prompt("Output directory path:", current);
     if (!newPath || newPath === current) return;
@@ -1057,18 +1068,19 @@ if (exportChangeDirBtn) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path: newPath }),
       });
-      if (resp.ok) {
+      if (resp.ok && exportOutputPath) {
         exportOutputPath.textContent = newPath;
       }
-    } catch (e) {
-      alert("Failed to save: " + e.message);
+    } catch (err) {
+      alert("Failed to save: " + err.message);
     }
-  });
-}
+    return;
+  }
 
-// Export all
-if (exportAllBtn) {
-  exportAllBtn.addEventListener("click", async () => {
+  const exportAllBtn = e.target.closest("#export-all-btn");
+  if (exportAllBtn) {
+    const exportResult = document.getElementById("export-result");
+    if (!exportResult) return;
     if (!confirm("Move all included documents to the output folder?")) return;
     exportAllBtn.disabled = true;
     exportAllBtn.textContent = "⏳ Exporting…";
@@ -1096,10 +1108,49 @@ if (exportAllBtn) {
       exportResult.textContent = `Error: ${err.message}`;
     } finally {
       exportAllBtn.disabled = false;
-      exportAllBtn.textContent = "🚀 Rename & move all";
+      exportAllBtn.textContent = exportAllBtn.dataset.defaultLabel || "🚀 Rename & move all";
     }
-  });
-}
+    return;
+  }
+
+  const inqomUploadBtn = e.target.closest("#inqom-upload-btn");
+  if (!inqomUploadBtn) return;
+  const resultDiv = document.getElementById("inqom-upload-result");
+  if (!resultDiv) return;
+  if (!acquireFetchLock("Inqom")) return;
+
+  inqomUploadBtn.disabled = true;
+  inqomUploadBtn.textContent = "⏳ Uploading…";
+  resultDiv.hidden = false;
+  resultDiv.className = "fetch-result fetch-result-progress";
+  resultDiv.textContent = "Starting Inqom upload…";
+
+  try {
+    const resp = await fetch("/api/inqom-upload", { method: "POST" });
+    if (!resp.ok && !resp.headers.get("content-type")?.includes("text/event-stream")) {
+      let message = `Server error: ${resp.status}`;
+      try {
+        const data = await resp.json();
+        message = data.error || data.message || message;
+      } catch {
+        const text = await resp.text();
+        if (text) message = text;
+      }
+      throw new Error(message);
+    }
+    await readProviderSSE(resp, resultDiv, {
+      onComplete: formatInqomComplete,
+      onDone: () => setTimeout(() => refreshDocumentsPanel(), 400),
+    });
+  } catch (err) {
+    resultDiv.className = "fetch-result fetch-result-error";
+    resultDiv.textContent = `Error: ${err.message}`;
+  } finally {
+    releaseFetchLock();
+    inqomUploadBtn.disabled = false;
+    inqomUploadBtn.textContent = "☁️ Upload to Inqom";
+  }
+});
 
 // === Rename modal ===
 (function() {
@@ -1228,6 +1279,7 @@ async function refreshDocumentsPanel() {
   const freshExport = doc.getElementById("panel-export");
   const currentExport = document.getElementById("panel-export");
   if (freshExport && currentExport) currentExport.innerHTML = freshExport.innerHTML;
+  loadExportOutputPath();
   // Refresh triage panel
   const freshTriage = doc.getElementById("panel-triage");
   const currentTriage = document.getElementById("panel-triage");
@@ -1283,8 +1335,21 @@ async function refreshDocumentsPanel() {
 
 // === Month kanban: collapse & bulk actions ===
 (function() {
-  // Collapse toggle
-  document.addEventListener("click", (e) => {
+  function parseIdList(raw) {
+    return (raw || "").split(",").filter(Boolean).map(Number);
+  }
+
+  async function bulkAccountingType(ids, accountingType) {
+    if (!ids.length || !accountingType) return;
+    await fetch("/documents/bulk-accounting-type", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ids, accounting_type: accountingType}),
+    });
+    await refreshDocumentsPanel();
+  }
+
+  document.addEventListener("click", async (e) => {
     const btn = e.target.closest(".collapse-month-btn");
     if (!btn) return;
     const section = btn.closest(".doc-kanban-section");
@@ -1333,86 +1398,98 @@ async function refreshDocumentsPanel() {
     });
   }
 
-  function parseIds(btn) {
-    const raw = btn.dataset.ids || "";
-    return raw.split(",").filter(Boolean).map(Number);
-  }
-
   document.addEventListener("click", (e) => {
     const inclBtn = e.target.closest(".bulk-include-month");
-    if (inclBtn) { bulkStatus(parseIds(inclBtn), "doc_included"); return; }
+    if (inclBtn) { bulkStatus(parseIdList(inclBtn.dataset.ids), "doc_included"); return; }
 
     const skipBtn = e.target.closest(".bulk-skip-month");
-    if (skipBtn) { bulkStatus(parseIds(skipBtn), "review_ignored"); return; }
+    if (skipBtn) { bulkStatus(parseIdList(skipBtn.dataset.ids), "review_ignored"); return; }
 
     const dismissBtn = e.target.closest(".bulk-dismiss-month");
     if (dismissBtn) {
       if (!confirm("Permanently dismiss these skipped documents? They won't reappear.")) return;
-      bulkDismiss(parseIds(dismissBtn));
+      bulkDismiss(parseIdList(dismissBtn.dataset.ids));
+      return;
+    }
+
+    const accountingBtn = e.target.closest(".bulk-accounting-type");
+    if (accountingBtn) {
+      const ids = parseIdList(accountingBtn.dataset.ids);
+      const accountingType = accountingBtn.dataset.accountingType;
+      if (!ids.length || !accountingType) return;
+      const originalText = accountingBtn.textContent;
+      accountingBtn.disabled = true;
+      accountingBtn.textContent = "⏳ Updating…";
+      bulkAccountingType(ids, accountingType)
+        .catch(() => {
+          accountingBtn.disabled = false;
+          accountingBtn.textContent = "❌ Error";
+          setTimeout(() => { accountingBtn.textContent = originalText; }, 1200);
+        });
     }
   });
 
   // Re-rename button with progress
-  const reRenameBtn = document.getElementById("re-rename-btn");
-  if (reRenameBtn) {
-    reRenameBtn.addEventListener("click", async () => {
-      reRenameBtn.disabled = true;
-      // Insert progress bar after the button
-      const bar = document.createElement("div");
-      bar.className = "re-rename-progress";
-      bar.innerHTML = '<div class="re-rename-progress-track"><div class="re-rename-progress-fill"></div></div><span class="re-rename-progress-label">Starting…</span>';
-      reRenameBtn.parentElement.appendChild(bar);
-      const fill = bar.querySelector(".re-rename-progress-fill");
-      const label = bar.querySelector(".re-rename-progress-label");
+  document.addEventListener("click", async (e) => {
+    const reRenameBtn = e.target.closest("#re-rename-btn");
+    if (!reRenameBtn) return;
+    reRenameBtn.disabled = true;
+    // Insert progress bar after the button
+    const bar = document.createElement("div");
+    bar.className = "re-rename-progress";
+    bar.innerHTML = '<div class="re-rename-progress-track"><div class="re-rename-progress-fill"></div></div><span class="re-rename-progress-label">Starting…</span>';
+    reRenameBtn.parentElement.appendChild(bar);
+    const fill = bar.querySelector(".re-rename-progress-fill");
+    const label = bar.querySelector(".re-rename-progress-label");
 
-      try {
-        const resp = await fetch("/documents/re-rename", {method: "POST"});
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = "";
-        while (true) {
-          const {done, value} = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, {stream: true});
-          const lines = buf.split("\n\n");
-          buf = lines.pop();
-          for (const line of lines) {
-            const m = line.match(/^data: (.+)$/m);
-            if (!m) continue;
-            const evt = JSON.parse(m[1]);
-            if (evt.type === "start") {
-              label.textContent = `0 / ${evt.total}`;
-            } else if (evt.type === "progress") {
-              const pct = Math.round((evt.current / evt.total) * 100);
-              fill.style.width = pct + "%";
-              label.textContent = `${evt.current} / ${evt.total} — ${evt.filename}`;
-            } else if (evt.type === "done") {
-              fill.style.width = "100%";
-              label.textContent = `✓ ${evt.updated} documents updated`;
-              setTimeout(() => location.reload(), 1000);
-            }
+    try {
+      const resp = await fetch("/documents/re-rename", {method: "POST"});
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, {stream: true});
+        const lines = buf.split("\n\n");
+        buf = lines.pop();
+        for (const line of lines) {
+          const m = line.match(/^data: (.+)$/m);
+          if (!m) continue;
+          const evt = JSON.parse(m[1]);
+          if (evt.type === "start") {
+            label.textContent = `0 / ${evt.total}`;
+          } else if (evt.type === "progress") {
+            const pct = Math.round((evt.current / evt.total) * 100);
+            fill.style.width = pct + "%";
+            label.textContent = `${evt.current} / ${evt.total} — ${evt.filename}`;
+          } else if (evt.type === "done") {
+            fill.style.width = "100%";
+            label.textContent = `✓ ${evt.updated} documents updated`;
+            setTimeout(() => location.reload(), 1000);
           }
         }
-      } catch (err) {
-        label.textContent = "❌ Error";
-        reRenameBtn.disabled = false;
       }
-    });
-  }
+    } catch (err) {
+      label.textContent = "❌ Error";
+      reRenameBtn.disabled = false;
+    }
+  });
 })();
 
 // === Triage tabs and bulk actions ===
 (function() {
   // Tab switching
-  document.querySelectorAll(".triage-tab").forEach(tab => {
-    tab.addEventListener("click", () => {
-      const section = tab.closest(".doc-triage-section");
+  document.addEventListener("click", (e) => {
+    const tab = e.target.closest(".triage-tab");
+    if (!tab) return;
+    const section = tab.closest(".doc-triage-section");
+    if (!section) return;
       section.querySelectorAll(".triage-tab").forEach(t => t.classList.remove("active"));
       section.querySelectorAll(".triage-tab-panel").forEach(p => p.classList.remove("active"));
       tab.classList.add("active");
       const panel = section.querySelector(`[data-triage-panel="${tab.dataset.triageTab}"]`);
       if (panel) panel.classList.add("active");
-    });
   });
 
   // Bulk accept suggested
@@ -1457,6 +1534,57 @@ async function refreshDocumentsPanel() {
     } catch (err) {
       btn.textContent = "❌ Error";
       btn.disabled = false;
+    }
+  });
+})();
+
+// === Accounting type controls ===
+(function() {
+  function getAccountingTypeMeta(accountingType) {
+    if (accountingType === "purchase") {
+      return { label: "📥 Achat", className: "accounting-type-purchase" };
+    }
+    if (accountingType === "sale") {
+      return { label: "📤 Vente", className: "accounting-type-sale" };
+    }
+    return { label: "❓", className: "accounting-type-unknown" };
+  }
+
+  function updateAccountingTypeInline(select, accountingType) {
+    const wrapper = select.closest(".accounting-type-inline");
+    const badge = wrapper?.querySelector(".accounting-type-badge");
+    if (!badge) return;
+    const meta = getAccountingTypeMeta(accountingType);
+    badge.textContent = meta.label;
+    badge.className = `badge accounting-type-badge ${meta.className}`;
+    select.dataset.accountingType = accountingType || "";
+  }
+
+  document.addEventListener("change", async (e) => {
+    const select = e.target.closest(".accounting-type-select");
+    if (!select) return;
+    const previousValue = select.dataset.accountingType || "";
+    const nextValue = select.value;
+    if (!nextValue || nextValue === previousValue) return;
+    select.disabled = true;
+
+    try {
+      const formData = new FormData();
+      formData.append("accounting_type", nextValue);
+      const resp = await fetch(`/documents/${select.dataset.documentId}/accounting-type`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!resp.ok) throw new Error(`Server error: ${resp.status}`);
+      const data = await resp.json().catch(() => ({}));
+      updateAccountingTypeInline(select, data.accounting_type || nextValue);
+      await refreshDocumentsPanel();
+    } catch (err) {
+      select.value = previousValue;
+      updateAccountingTypeInline(select, previousValue);
+      alert(`Failed to update accounting type: ${err.message}`);
+    } finally {
+      select.disabled = false;
     }
   });
 })();

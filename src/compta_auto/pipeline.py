@@ -20,6 +20,7 @@ from .models import (
 from .normalize import email_domain, normalize_vendor
 from .renamer import rename_document
 from .repositories import Repository
+from .services.categorize import auto_categorize_document
 from .spark_client import SparkClient
 
 # Vendors that have a configured fetcher — mails from these don't need triage
@@ -72,6 +73,7 @@ class AccountingPipeline:
                 for message in self.spark.read_thread(message_id, download_attachments=True):
                     summary.scanned_messages += 1
                     self.process_message(message, summary)
+            self.categorize_uncategorized_documents()
             self.repo.finish_run(run_id, "finished", summary.as_dict())
         except Exception as exc:
             summary.failures.append(str(exc))
@@ -97,6 +99,7 @@ class AccountingPipeline:
                     continue
                 summary.scanned_messages += 1
                 self._process_local_file(file_path, summary, known_vendor=known_vendor)
+            self.categorize_uncategorized_documents()
             self.repo.finish_run(run_id, "finished", summary.as_dict())
         except Exception as exc:
             summary.failures.append(str(exc))
@@ -147,6 +150,9 @@ class AccountingPipeline:
                 metadata.confidence, metadata.method, "rename_review_needed",
             )
             summary.rename_review_needed += 1
+        self.repo.update_document_accounting_type(
+            doc_id, auto_categorize_document({"detected_vendor": metadata.vendor})
+        )
 
     def process_message(self, message: MailMessage, summary: RunSummary) -> None:
         existing = self.repo.get_mail_by_spark_id(message.spark_message_id)
@@ -320,6 +326,20 @@ class AccountingPipeline:
                 "rename_review_needed",
             )
             summary.rename_review_needed += 1
+
+        self.repo.update_document_accounting_type(
+            document_id, auto_categorize_document({"detected_vendor": metadata.vendor})
+        )
+
+    def categorize_uncategorized_documents(self) -> int:
+        categorized = 0
+        for document in self.repo.list_uncategorized_documents():
+            self.repo.update_document_accounting_type(
+                int(document["id"]),
+                auto_categorize_document(document),
+            )
+            categorized += 1
+        return categorized
 
 
 def is_likely_accounting(message: MailMessage) -> bool:

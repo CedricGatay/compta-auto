@@ -4,14 +4,26 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Compta Auto</title>
-    <link rel="stylesheet" href="/static/styles.css?v=9">
-    <script src="/static/app.js?v=20" defer></script>
+    <link rel="stylesheet" href="/static/styles.css?v=10">
+    <script src="/static/app.js?v=21" defer></script>
   </head>
   <body>
     {% set triage_count = (mails|selectattr("status", "equalto", "mail_triage_needed")|list|length) + (mails|selectattr("status", "equalto", "mail_missing_provider")|list|length) %}
     {% set review_count = documents|selectattr("status", "equalto", "rename_review_needed")|list|length + documents|selectattr("status", "equalto", "renamed")|list|length %}
     {% set export_count = documents|selectattr("status", "equalto", "doc_included")|list|length %}
     {% set provider_link_count = provider_tasks|length %}
+    {% macro accounting_type_badge(accounting_type) -%}
+    <span class="badge accounting-type-badge accounting-type-{{ accounting_type or 'unknown' }}">
+      {% if accounting_type == "purchase" %}📥 Achat{% elif accounting_type == "sale" %}📤 Vente{% else %}❓{% endif %}
+    </span>
+    {%- endmacro %}
+    {% macro accounting_type_select(document) -%}
+    <select class="accounting-type-select" data-document-id="{{ document.id }}" data-accounting-type="{{ document.accounting_type or '' }}" title="Accounting type">
+      <option value="" {% if not document.accounting_type %}selected disabled{% endif %}>❓ Uncategorized</option>
+      <option value="purchase" {% if document.accounting_type == "purchase" %}selected{% endif %}>📥 Achat</option>
+      <option value="sale" {% if document.accounting_type == "sale" %}selected{% endif %}>📤 Vente</option>
+    </select>
+    {%- endmacro %}
 
     <header>
       <div class="header-left">
@@ -365,6 +377,12 @@
                 {% if not pdf_with_suggestion %}disabled{% endif %}>✓ Use suggested for all ({{ pdf_with_suggestion|length }})</button>
               <button type="button" class="btn btn-ghost btn-sm bulk-skip-triage"
                 data-ids="{{ pdf_triage|map(attribute='id')|list|join(',') }}">✗ Skip all ({{ pdf_triage|length }})</button>
+              <button type="button" class="btn btn-outline btn-sm bulk-accounting-type"
+                data-accounting-type="purchase"
+                data-ids="{{ pdf_triage|map(attribute='id')|list|join(',') }}">📥 Set as Purchase</button>
+              <button type="button" class="btn btn-outline btn-sm bulk-accounting-type"
+                data-accounting-type="sale"
+                data-ids="{{ pdf_triage|map(attribute='id')|list|join(',') }}">📤 Set as Sale</button>
             </div>
             <div class="doc-triage-grid">
               {% for document in pdf_triage %}
@@ -380,6 +398,10 @@
                     {% if document.source_from_display %}<span>From: {{ document.source_from_display }}</span>{% endif %}
                     {% if document.detected_vendor %}<span>Vendor: <strong>{{ document.detected_vendor }}</strong></span>{% endif %}
                     {% if document.detected_date %}<span>Date: {{ document.detected_date }}</span>{% endif %}
+                  </div>
+                  <div class="accounting-type-inline">
+                    {{ accounting_type_badge(document.accounting_type) }}
+                    {{ accounting_type_select(document) }}
                   </div>
                   {% if document.supposed_filename %}
                   <div class="doc-triage-suggested">→ <code>{{ document.supposed_filename }}</code></div>
@@ -423,6 +445,12 @@
                 {% if not other_with_suggestion %}disabled{% endif %}>✓ Use suggested for all ({{ other_with_suggestion|length }})</button>
               <button type="button" class="btn btn-ghost btn-sm bulk-skip-triage"
                 data-ids="{{ other_triage|map(attribute='id')|list|join(',') }}">✗ Skip all ({{ other_triage|length }})</button>
+              <button type="button" class="btn btn-outline btn-sm bulk-accounting-type"
+                data-accounting-type="purchase"
+                data-ids="{{ other_triage|map(attribute='id')|list|join(',') }}">📥 Set as Purchase</button>
+              <button type="button" class="btn btn-outline btn-sm bulk-accounting-type"
+                data-accounting-type="sale"
+                data-ids="{{ other_triage|map(attribute='id')|list|join(',') }}">📤 Set as Sale</button>
             </div>
             <div class="doc-triage-grid">
               {% for document in other_triage %}
@@ -441,6 +469,10 @@
                     {% if document.source_from_display %}<span>From: {{ document.source_from_display }}</span>{% endif %}
                     {% if document.detected_vendor %}<span>Vendor: <strong>{{ document.detected_vendor }}</strong></span>{% endif %}
                     {% if document.detected_date %}<span>Date: {{ document.detected_date }}</span>{% endif %}
+                  </div>
+                  <div class="accounting-type-inline">
+                    {{ accounting_type_badge(document.accounting_type) }}
+                    {{ accounting_type_select(document) }}
                   </div>
                   {% if document.supposed_filename %}
                   <div class="doc-triage-suggested">→ <code>{{ document.supposed_filename }}</code></div>
@@ -485,6 +517,7 @@
         {% set month_renamed = renamed_docs|selectattr('month_key', 'equalto', current_month)|list %}
         {% set month_included = included_docs|selectattr('month_key', 'equalto', current_month)|list %}
         {% set month_skipped = skipped_docs|selectattr('month_key', 'equalto', current_month)|list %}
+        {% set month_all_docs = month_renamed + month_included + month_skipped %}
         <section class="doc-kanban-section" data-month="{{ current_month }}">
           <div class="kanban-section-header">
             <h2 class="section-title">📂 {{ current_month }}
@@ -503,6 +536,12 @@
                 data-ids="{{ month_skipped|map(attribute='id')|list|join(',') }}"
                 title="Permanently dismiss all skipped documents for this month"
                 {% if not month_skipped %}disabled{% endif %}>🗑 Clear skipped</button>
+              <button type="button" class="btn btn-outline btn-xs bulk-accounting-type"
+                data-accounting-type="purchase"
+                data-ids="{{ month_all_docs|map(attribute='id')|list|join(',') }}">📥 Purchase</button>
+              <button type="button" class="btn btn-outline btn-xs bulk-accounting-type"
+                data-accounting-type="sale"
+                data-ids="{{ month_all_docs|map(attribute='id')|list|join(',') }}">📤 Sale</button>
               <button type="button" class="btn btn-ghost btn-xs collapse-month-btn" title="Collapse/expand">▼</button>
             </div>
           </div>
@@ -537,6 +576,10 @@
                       {% if document.source_from_display %}
                       <div class="kanban-card-meta">From: {{ document.source_from_display }}</div>
                       {% endif %}
+                      <div class="accounting-type-inline">
+                        {{ accounting_type_badge(document.accounting_type) }}
+                        {{ accounting_type_select(document) }}
+                      </div>
                     </div>
                   </div>
                   <div class="kanban-card-actions">
@@ -587,6 +630,10 @@
                     <div class="kanban-card-info">
                       <div class="kanban-card-filename" title="{{ document.final_filename or document.original_filename }}">{{ document.final_filename or document.original_filename }}</div>
                       <div class="kanban-card-meta">{{ document.detected_vendor or "" }} · {{ document.detected_date or "" }}</div>
+                      <div class="accounting-type-inline">
+                        {{ accounting_type_badge(document.accounting_type) }}
+                        {{ accounting_type_select(document) }}
+                      </div>
                     </div>
                   </div>
                   <div class="kanban-card-actions">
@@ -625,6 +672,10 @@
                     <div class="kanban-card-info">
                       <div class="kanban-card-filename" title="{{ document.final_filename or document.original_filename }}">{{ document.final_filename or document.original_filename }}</div>
                       <div class="kanban-card-meta">{{ document.source_from_display or "" }}</div>
+                      <div class="accounting-type-inline">
+                        {{ accounting_type_badge(document.accounting_type) }}
+                        {{ accounting_type_select(document) }}
+                      </div>
                     </div>
                   </div>
                   <div class="kanban-card-actions">
@@ -963,10 +1014,13 @@
           <div class="panel-header-actions">
             <span class="export-output-label">Output: <code id="export-output-path">loading…</code></span>
             <button type="button" class="btn btn-outline btn-sm" id="export-change-dir-btn">📂 Change</button>
-            <button type="button" class="btn btn-primary" id="export-all-btn" {% if not export_docs %}disabled{% endif %}>
-              🚀 Rename &amp; move all ({{ export_docs|length }})
+          <button type="button" class="btn btn-outline btn-sm" id="inqom-upload-btn" {% if not export_docs %}disabled{% endif %}>
+            ☁️ Upload to Inqom
             </button>
-          </div>
+          <button type="button" class="btn btn-primary" id="export-all-btn" data-default-label="🚀 Rename &amp; move all ({{ export_docs|length }})" {% if not export_docs %}disabled{% endif %}>
+            🚀 Rename &amp; move all ({{ export_docs|length }})
+          </button>
+        </div>
         </div>
 
         {% if export_docs %}
@@ -997,6 +1051,10 @@
                   {{ document.final_filename or document.supposed_filename or document.original_filename }}
                 </span>
                 <span class="export-item-meta">{{ document.detected_vendor or "" }}</span>
+                <div class="accounting-type-inline">
+                  {{ accounting_type_badge(document.accounting_type) }}
+                  {{ accounting_type_select(document) }}
+                </div>
               </div>
               <div class="export-item-actions">
                 <button type="button" class="btn btn-outline btn-xs inline-rename-toggle" title="Rename"
@@ -1019,6 +1077,7 @@
         {% endif %}
 
         <div id="export-result" class="fetch-result" hidden></div>
+        <div id="inqom-upload-result" class="fetch-result" hidden></div>
       </div>
       </div>
 

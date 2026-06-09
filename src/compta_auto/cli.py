@@ -4,12 +4,14 @@ import argparse
 import json
 import signal
 import sys
+from pathlib import Path
 
 import uvicorn
 
 from .app import create_app
 from .config import get_settings
 from .db import Database
+from .inqom_upload import list_inqom_upload_candidates, stream_inqom_upload
 from .pipeline import AccountingPipeline
 from .repositories import Repository
 
@@ -25,12 +27,17 @@ def main() -> None:
     scan = subparsers.add_parser("scan")
     scan.add_argument("--months", default=1, type=int)
 
+    subparsers.add_parser("categorize")
+
     provider = subparsers.add_parser("add-provider")
     provider.add_argument("--vendor", required=True)
     provider.add_argument("--url", required=True)
     provider.add_argument("--notes", default="")
 
     inqom_explore = subparsers.add_parser("inqom-explore", help="Explore Inqom UI interactively")
+    inqom_upload = subparsers.add_parser("inqom-upload", help="Upload ready documents to Inqom")
+    inqom_upload.add_argument("--dry-run", action="store_true")
+    inqom_upload.add_argument("--type", choices=["purchase", "sale", "all"], default="all")
 
     args = parser.parse_args()
     settings = get_settings()
@@ -74,14 +81,57 @@ def main() -> None:
         if args.command == "scan":
             summary = AccountingPipeline(settings, repo).run_mail_scan(months=args.months)
             print(json.dumps(summary.as_dict(), indent=2, sort_keys=True))
+        elif args.command == "categorize":
+            categorized = AccountingPipeline(settings, repo).categorize_uncategorized_documents()
+            print(json.dumps({"categorized": categorized}, indent=2, sort_keys=True))
         elif args.command == "add-provider":
             task_id, created = repo.add_provider_task(
                 args.vendor, args.url, None, "provider_manual_link", args.notes
             )
             print(json.dumps({"id": task_id, "created": created}, indent=2, sort_keys=True))
+        elif args.command == "inqom-upload":
+            documents = list_inqom_upload_candidates(repo, args.type)
+            if not documents:
+                print("No documents ready for Inqom upload.")
+            else:
+                print("Documents selected for Inqom upload:")
+                for document in documents:
+                    filename = document.get("final_filename") or Path(document["upload_path"]).name
+                    print(
+                        f"- #{document['id']} [{document['accounting_type']}] {filename} "
+                        f"({document['status']}) -> {document['upload_path']}"
+                    )
+
+            if args.dry_run:
+                print(f"Dry run complete: {len(documents)} document(s) would be uploaded.")
+            elif documents:
+                had_errors = False
+                for event in stream_inqom_upload(repo, settings, documents):
+                    event_type = event["type"]
+                    if event_type == "status":
+                        print(event["message"])
+                    elif event_type == "progress":
+                        print(event["message"])
+                    elif event_type == "group_start":
+                        print(
+                            f"Uploading {event['count']} {event['accounting_type']} "
+                            f"document(s) as {event['doc_type']}..."
+                        )
+                    elif event_type == "uploaded":
+                        print(f"Uploaded #{event['document_id']} {event['file']} -> {event['status']}")
+                    elif event_type == "error":
+                        had_errors = True
+                        print(f"Error: {event['error']}", file=sys.stderr)
+                    elif event_type in {"group_done", "done"}:
+                        if event["result"].get("errors"):
+                            had_errors = True
+                        print(json.dumps(event["result"], indent=2, sort_keys=True))
+
+                if had_errors:
+                    conn.commit()
+                    sys.exit(1)
         conn.commit()
 
 
 if __name__ == "__main__":
     main()
-

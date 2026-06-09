@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import calendar
 import json
 import logging
 import time
+from datetime import date
 from pathlib import Path
 from typing import Generator
 
 from playwright.sync_api import sync_playwright, Page, BrowserContext
+
+from .config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -166,12 +170,30 @@ class InqomUploader:
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         self._context.storage_state(path=str(self.state_file))
 
+    def _fiscal_year_dates(self) -> tuple[str, str]:
+        """Return the current fiscal year boundaries as ISO dates."""
+        today = date.today()
+        start_month = get_settings().inqom_fiscal_year_start_month
+        start_year = today.year if today.month >= start_month else today.year - 1
+
+        end_month = 12 if start_month == 1 else start_month - 1
+        end_year = start_year if start_month == 1 else start_year + 1
+        end_day = calendar.monthrange(end_year, end_month)[1]
+
+        begin_date = date(start_year, start_month, 1)
+        end_date = date(end_year, end_month, end_day)
+        return begin_date.isoformat(), end_date.isoformat()
+
     def navigate_to_upload(self, doc_type: str = "SupplierBill"):
         """Navigate to the document upload section for the given type."""
         page = self._page
+        begin_date, end_date = self._fiscal_year_dates()
 
         # Force full-page navigation using the absolute URL
-        pieces_url = f"https://home.inqom.com/clients/{self.client_id}/gestion/accounting-documents?begin_date=2025-08-01&end_date=2026-07-31"
+        pieces_url = (
+            f"https://home.inqom.com/clients/{self.client_id}/gestion/accounting-documents"
+            f"?begin_date={begin_date}&end_date={end_date}"
+        )
         logger.info(f"Forcing navigation to: {pieces_url}")
         page.evaluate(f"window.location.assign('{pieces_url}')")
 
@@ -287,6 +309,7 @@ class InqomUploader:
         """
         total = len(file_paths)
         uploaded = 0
+        uploaded_files: list[str] = []
         errors: list[str] = []
 
         yield {"type": "status", "message": "Navigating to Inqom upload section…"}
@@ -307,6 +330,14 @@ class InqomUploader:
             try:
                 self.upload_document(file_path, doc_type)
                 uploaded += 1
+                uploaded_files.append(str(file_path))
+                yield {
+                    "type": "uploaded",
+                    "current": i,
+                    "total": total,
+                    "file": file_path.name,
+                    "file_path": str(file_path),
+                }
             except Exception as e:
                 errors.append(f"{file_path.name}: {e}")
                 logger.warning(f"Failed to upload {file_path.name}: {e}")
@@ -314,6 +345,7 @@ class InqomUploader:
         yield {"type": "done", "result": {
             "total": total,
             "uploaded": uploaded,
+            "uploaded_files": uploaded_files,
             "errors": errors,
         }}
 

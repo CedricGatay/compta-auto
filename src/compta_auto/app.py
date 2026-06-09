@@ -17,7 +17,7 @@ from fastapi.responses import HTMLResponse
 from .config import Settings, get_settings
 from .db import Database
 from .repositories import Repository
-from .routes import credentials, documents, mails, providers, rules, scan
+from .routes import credentials, documents, inqom, mails, providers, rules, scan
 from .routes.deps import get_db as get_db_dep_key, get_fernet as get_fernet_dep_key, get_repo as get_repo_dep_key, get_settings as get_settings_dep_key
 from .services.crypto import get_fernet as make_fernet
 
@@ -133,6 +133,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(credentials.router)
     app.include_router(providers.router)
     app.include_router(documents.router)
+    app.include_router(inqom.router)
     app.include_router(mails.router)
     app.include_router(rules.router)
 
