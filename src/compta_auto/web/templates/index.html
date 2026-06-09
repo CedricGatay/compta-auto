@@ -8,7 +8,7 @@
     <script src="/static/app.js?v=20" defer></script>
   </head>
   <body>
-    {% set triage_count = mails|selectattr("status", "equalto", "mail_triage_needed")|list|length %}
+    {% set triage_count = (mails|selectattr("status", "equalto", "mail_triage_needed")|list|length) + (mails|selectattr("status", "equalto", "mail_missing_provider")|list|length) %}
     {% set review_count = documents|selectattr("status", "equalto", "rename_review_needed")|list|length + documents|selectattr("status", "equalto", "renamed")|list|length %}
     {% set export_count = documents|selectattr("status", "equalto", "doc_included")|list|length %}
     {% set provider_link_count = provider_tasks|length %}
@@ -117,35 +117,35 @@
             <span class="wizard-step-index">2</span>
             <span class="wizard-step-copy">
               <span class="wizard-step-title">🔗 Fetch providers</span>
-              <span class="wizard-step-status">{% if provider_link_count %}{{ provider_link_count }} provider links saved{% else %}7 providers ready{% endif %}</span>
+              <span class="wizard-step-status" id="wizard-status-fetch">{% if provider_link_count %}{{ provider_link_count }} provider links saved{% else %}7 providers ready{% endif %}</span>
             </span>
           </button>
           <button class="wizard-step" type="button" data-wizard-step="folder" role="tab" aria-selected="false">
             <span class="wizard-step-index">3</span>
             <span class="wizard-step-copy">
               <span class="wizard-step-title">📁 Scan folder</span>
-              <span class="wizard-step-status">{{ last_scan_folder.split('/')[-1] if last_scan_folder else 'Pick a folder' }}</span>
+              <span class="wizard-step-status" id="wizard-status-folder">{{ last_scan_folder.split('/')[-1] if last_scan_folder else 'Pick a folder' }}</span>
             </span>
           </button>
           <button class="wizard-step" type="button" data-wizard-step="triage" role="tab" aria-selected="false">
             <span class="wizard-step-index">4</span>
             <span class="wizard-step-copy">
               <span class="wizard-step-title">📋 Triage</span>
-              <span class="wizard-step-status">{% if triage_count %}{{ triage_count }} mails to review{% else %}✓ Nothing to do{% endif %}</span>
+              <span class="wizard-step-status" id="wizard-status-triage">{% if triage_count %}{{ triage_count }} mails to review{% else %}✓ Nothing to do{% endif %}</span>
             </span>
           </button>
           <button class="wizard-step" type="button" data-wizard-step="rename" role="tab" aria-selected="false">
             <span class="wizard-step-index">5</span>
             <span class="wizard-step-copy">
               <span class="wizard-step-title">📂 Rename</span>
-              <span class="wizard-step-status">{% if review_count %}{{ review_count }} documents queued{% else %}✓ Nothing to do{% endif %}</span>
+              <span class="wizard-step-status" id="wizard-status-rename">{% if review_count %}{{ review_count }} documents queued{% else %}✓ Nothing to do{% endif %}</span>
             </span>
           </button>
           <button class="wizard-step" type="button" data-wizard-step="export" role="tab" aria-selected="false">
             <span class="wizard-step-index">6</span>
             <span class="wizard-step-copy">
               <span class="wizard-step-title">📦 Export</span>
-              <span class="wizard-step-status">{% if export_count %}{{ export_count }} ready{% else %}✓ Nothing to export{% endif %}</span>
+              <span class="wizard-step-status" id="wizard-status-export">{% if export_count %}{{ export_count }} ready{% else %}✓ Nothing to export{% endif %}</span>
             </span>
           </button>
         </div>
@@ -262,7 +262,7 @@
       <!-- TRIAGE TAB -->
       <div class="panel-home" data-panel-home="triage">
         <div class="tab-panel active" id="panel-triage" role="tabpanel">
-        {% set triage_mails = mails|selectattr("status", "equalto", "mail_triage_needed")|list %}
+        {% set triage_mails = mails|selectattr("status", "equalto", "mail_triage_needed")|list + mails|selectattr("status", "equalto", "mail_missing_provider")|list %}
         {% set domain_suffix = "@" + settings.accounting_domain %}
         {% set invoice_mails = [] %}
         {% set other_mails = [] %}
@@ -839,6 +839,7 @@
               <input type="text" name="username" id="free-username" placeholder="8-digit subscriber ID" autocomplete="off" pattern="\d{8}" style="max-width:160px">
               <input type="password" name="password" id="free-password" placeholder="Password" autocomplete="off">
               <button type="submit" class="btn btn-primary" id="fetch-free-login-btn">🔑 Login</button>
+              <button type="button" class="btn btn-success" id="fetch-free-auto-btn">🤖 Auto-fetch</button>
               <button type="button" class="btn btn-sm btn-link cred-edit-btn" id="free-edit-btn" hidden>✏️</button>
             </div>
           </form>
@@ -935,6 +936,7 @@
               <input type="email" name="email" id="engie-email" placeholder="Email" autocomplete="off" style="max-width:200px">
               <input type="password" name="password" id="engie-password" placeholder="Mot de passe" autocomplete="off">
               <button type="submit" class="btn btn-primary" id="fetch-engie-login-btn">🔐 Login</button>
+              <button type="button" class="btn btn-success" id="fetch-engie-auto-btn">🤖 Auto-fetch</button>
               <button type="button" class="btn btn-sm btn-link cred-edit-btn" id="engie-edit-btn" hidden>✏️</button>
             </div>
           </form>
@@ -1085,6 +1087,15 @@
         </div>
         <div class="danger-zone" style="margin-top: 12px;">
           <div class="danger-zone-info">
+            <strong>Purge mail scans</strong>
+            <p>Delete all scanned mails, attachments, and provider tasks. Documents, rules, and credentials are kept. Re-scan to reclassify mails.</p>
+          </div>
+          <form method="post" action="/purge-mails" onsubmit="return confirm('This will delete all scanned mails and provider tasks. Documents and rules are kept. Continue?')">
+            <button type="submit" class="btn btn-danger btn-sm">Purge mail scans</button>
+          </form>
+        </div>
+        <div class="danger-zone" style="margin-top: 12px;">
+          <div class="danger-zone-info">
             <strong>Purge everything</strong>
             <p>Delete <em>all</em> data including rules, documents, mails, and settings. Only saved credentials (passwords/tokens) are preserved.</p>
           </div>
@@ -1110,7 +1121,7 @@
         <div class="pdf-preview-footer">
           <button type="button" class="btn btn-ghost" id="pdf-preview-cancel">Cancel</button>
           <form id="pdf-preview-save-form" method="post" action="">
-            <button type="submit" class="btn btn-primary">✓ Save as document</button>
+            <button type="submit" class="btn btn-primary">✓ Process &amp; save document</button>
           </form>
         </div>
       </div>

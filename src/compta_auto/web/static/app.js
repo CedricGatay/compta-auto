@@ -546,8 +546,8 @@ if (scanFolderForm) {
 let fetchInProgress = false;
 let fetchInProgressProvider = "";
 const ALL_FETCH_BTNS = [
-  "fetch-spotify-btn", "fetch-chatgpt-btn", "fetch-free-login-btn", "fetch-free-otp-btn",
-  "fetch-orange-btn", "fetch-sosh-btn", "fetch-freebox-btn", "fetch-ovh-btn", "fetch-engie-login-btn", "fetch-engie-otp-btn"
+  "fetch-spotify-btn", "fetch-chatgpt-btn", "fetch-free-login-btn", "fetch-free-otp-btn", "fetch-free-auto-btn",
+  "fetch-orange-btn", "fetch-sosh-btn", "fetch-freebox-btn", "fetch-ovh-btn", "fetch-engie-login-btn", "fetch-engie-otp-btn", "fetch-engie-auto-btn"
 ];
 
 function acquireFetchLock(providerName) {
@@ -572,180 +572,180 @@ function releaseFetchLock() {
   }
 }
 
+// === Generic provider SSE fetch ===
+// Reads an SSE stream from a provider endpoint and updates the UI.
+// `onComplete` is optional; defaults to standard invoice result formatting.
+function readProviderSSE(resp, resultDiv, { credFields, badgeId, editBtnId, onComplete, onDone }) {
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  function formatDefaultComplete(r) {
+    const parts = [];
+    if (r.downloaded > 0) parts.push(`✅ Downloaded ${r.downloaded} new invoice(s)`);
+    if (r.skipped > 0) parts.push(`⏭ ${r.skipped} already present`);
+    if (r.processed > 0) parts.push(`📄 ${r.processed} processed by pipeline`);
+    if (r.errors && r.errors.length > 0) parts.push(`⚠️ ${r.errors.length} error(s)`);
+    if (parts.length === 0) parts.push("No new invoices to download.");
+    return parts.join("<br>");
+  }
+
+  return (async () => {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const event = JSON.parse(line.slice(6));
+        if (event.type === "progress") {
+          const pct = event.total > 0 ? Math.round((event.current / event.total) * 100) : 0;
+          resultDiv.innerHTML = `<div class="fetch-progress-bar"><div class="fetch-progress-fill" style="width:${pct}%"></div></div><span>${event.message}</span>`;
+        } else if (event.type === "status") {
+          resultDiv.innerHTML = `<span>⏳ ${event.message}</span>`;
+        } else if (event.type === "complete") {
+          const r = event.result;
+          resultDiv.className = "fetch-result fetch-result-success";
+          if (onComplete) {
+            onComplete(r, resultDiv);
+          } else {
+            resultDiv.innerHTML = formatDefaultComplete(r);
+            if (r.downloaded > 0 || r.processed > 0) {
+              resultDiv.innerHTML += '<br><a href="/" class="btn btn-outline btn-sm" style="margin-top:8px">🔄 Refresh to see new documents</a>';
+            }
+          }
+          if (onDone) onDone(r);
+        } else if (event.type === "error") {
+          resultDiv.className = "fetch-result fetch-result-error";
+          resultDiv.textContent = event.error;
+          if (credFields) revealCredFields(credFields, badgeId, editBtnId);
+        }
+      }
+    }
+  })();
+}
+
+// Standard complete handler used by most providers (compact text format)
+function formatCompactComplete(r, resultDiv) {
+  let msg = `Done! ${r.downloaded} downloaded, ${r.skipped} skipped.`;
+  if (r.processed) msg += ` ${r.processed} processed.`;
+  if (r.message) msg += ` ${r.message}`;
+  if (r.errors && r.errors.length) msg += ` (${r.errors.length} errors)`;
+  resultDiv.textContent = msg;
+}
+
+// Bind a single-step provider fetch form (credentials → POST → SSE stream)
+function bindProviderFetch({ formId, btnId, resultId, providerName, endpoint, btnLabel, connectingMsg, credInputIds, badgeId, editBtnId, buildFormData }) {
+  const form = document.getElementById(formId);
+  if (!form) return;
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!acquireFetchLock(providerName)) return;
+    const btn = document.getElementById(btnId);
+    const resultDiv = document.getElementById(resultId);
+
+    // Gather credentials; skip if hidden (already saved)
+    const creds = {};
+    let hasVisible = false;
+    let allFilled = true;
+    for (const id of credInputIds) {
+      const el = document.getElementById(id);
+      if (!el.hidden) {
+        hasVisible = true;
+        if (!el.value.trim()) allFilled = false;
+        creds[id] = el.value.trim();
+      } else {
+        creds[id] = "";
+      }
+    }
+    if (hasVisible && !allFilled) return;
+
+    btn.disabled = true;
+    btn.textContent = "⏳ Fetching…";
+    resultDiv.hidden = false;
+    resultDiv.className = "fetch-result fetch-result-progress";
+    resultDiv.textContent = connectingMsg;
+
+    try {
+      const formData = buildFormData(creds);
+      const resp = await fetch(endpoint, { method: "POST", body: formData });
+
+      if (!resp.ok && !resp.headers.get("content-type")?.includes("text/event-stream")) {
+        const data = await resp.json();
+        resultDiv.className = "fetch-result fetch-result-error";
+        resultDiv.textContent = data.error || `Server error: ${resp.status}`;
+        revealCredFields(credInputIds, badgeId, editBtnId);
+        return;
+      }
+
+      await readProviderSSE(resp, resultDiv, { credFields: credInputIds, badgeId, editBtnId });
+    } catch (err) {
+      resultDiv.className = "fetch-result fetch-result-error";
+      resultDiv.textContent = `Network error: ${err.message}`;
+    } finally {
+      releaseFetchLock();
+      btn.disabled = false;
+      btn.textContent = btnLabel;
+    }
+  });
+}
+
 // === Spotify fetch ===
-const spotifyForm = document.getElementById("fetch-spotify-form");
-if (spotifyForm) {
-  spotifyForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    if (!acquireFetchLock("Spotify")) return;
-    const btn = document.getElementById("fetch-spotify-btn");
-    const resultDiv = document.getElementById("fetch-spotify-result");
-    const spDcInput = document.getElementById("spotify-sp-dc");
-    const spDc = spDcInput.hidden ? "" : spDcInput.value.trim();
+bindProviderFetch({
+  formId: "fetch-spotify-form", btnId: "fetch-spotify-btn", resultId: "fetch-spotify-result",
+  providerName: "Spotify", endpoint: "/api/fetch-spotify", btnLabel: "🔄 Fetch invoices",
+  connectingMsg: "Connecting to Spotify…",
+  credInputIds: ["spotify-sp-dc"], badgeId: "spotify-saved-badge", editBtnId: "spotify-edit-btn",
+  buildFormData: (creds) => { const fd = new FormData(); fd.append("sp_dc", creds["spotify-sp-dc"]); return fd; },
+});
 
-    // If field is visible and empty, it means no saved cred either
-    if (!spDcInput.hidden && !spDc) return;
+// === ChatGPT fetch ===
+bindProviderFetch({
+  formId: "fetch-chatgpt-form", btnId: "fetch-chatgpt-btn", resultId: "fetch-chatgpt-result",
+  providerName: "ChatGPT", endpoint: "/api/fetch-chatgpt", btnLabel: "🔄 Fetch invoices",
+  connectingMsg: "Connecting to ChatGPT…",
+  credInputIds: ["chatgpt-bearer"], badgeId: "chatgpt-saved-badge", editBtnId: "chatgpt-edit-btn",
+  buildFormData: (creds) => { const fd = new FormData(); fd.append("bearer_token", creds["chatgpt-bearer"]); return fd; },
+});
 
-    btn.disabled = true;
-    btn.textContent = "⏳ Fetching…";
-    resultDiv.hidden = false;
-    resultDiv.className = "fetch-result fetch-result-progress";
-    resultDiv.textContent = "Connecting to Spotify…";
+// === Orange fetch ===
+bindProviderFetch({
+  formId: "fetch-orange-form", btnId: "fetch-orange-btn", resultId: "fetch-orange-result",
+  providerName: "Orange", endpoint: "/api/orange-fetch", btnLabel: "📥 Fetch Invoices",
+  connectingMsg: "Launching browser and authenticating… (15-30s)",
+  credInputIds: ["orange-username", "orange-password"], badgeId: "orange-saved-badge", editBtnId: "orange-edit-btn",
+  buildFormData: (creds) => { const fd = new FormData(); fd.append("username", creds["orange-username"]); fd.append("password", creds["orange-password"]); return fd; },
+});
 
-    try {
-      const formData = new FormData();
-      formData.append("sp_dc", spDc);
+// === Sosh fetch ===
+bindProviderFetch({
+  formId: "fetch-sosh-form", btnId: "fetch-sosh-btn", resultId: "fetch-sosh-result",
+  providerName: "Sosh", endpoint: "/api/sosh-fetch", btnLabel: "📥 Fetch Invoices",
+  connectingMsg: "Launching browser and authenticating… (15-30s)",
+  credInputIds: ["sosh-username", "sosh-password"], badgeId: "sosh-saved-badge", editBtnId: "sosh-edit-btn",
+  buildFormData: (creds) => { const fd = new FormData(); fd.append("username", creds["sosh-username"]); fd.append("password", creds["sosh-password"]); return fd; },
+});
 
-      const resp = await fetch("/api/fetch-spotify", { method: "POST", body: formData });
+// === Freebox fetch ===
+bindProviderFetch({
+  formId: "fetch-freebox-form", btnId: "fetch-freebox-btn", resultId: "fetch-freebox-result",
+  providerName: "Freebox", endpoint: "/api/freebox-fetch", btnLabel: "📥 Fetch Invoices",
+  connectingMsg: "Logging in to Freebox subscriber portal…",
+  credInputIds: ["freebox-username", "freebox-password"], badgeId: "freebox-saved-badge", editBtnId: "freebox-edit-btn",
+  buildFormData: (creds) => { const fd = new FormData(); fd.append("username", creds["freebox-username"]); fd.append("password", creds["freebox-password"]); return fd; },
+});
 
-      if (!resp.ok && !resp.headers.get("content-type")?.includes("text/event-stream")) {
-        const data = await resp.json();
-        resultDiv.className = "fetch-result fetch-result-error";
-        resultDiv.textContent = data.error || "Unknown error occurred.";
-        revealCredFields(["spotify-sp-dc"], "spotify-saved-badge", "spotify-edit-btn");
-        btn.disabled = false;
-        btn.textContent = "🔄 Fetch invoices";
-        return;
-      }
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        const lines = buffer.split("\n");
-        buffer = lines.pop(); // keep incomplete line in buffer
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const event = JSON.parse(line.slice(6));
-
-          if (event.type === "progress") {
-            const pct = event.total > 0 ? Math.round((event.current / event.total) * 100) : 0;
-            resultDiv.innerHTML = `<div class="fetch-progress-bar"><div class="fetch-progress-fill" style="width:${pct}%"></div></div><span>${event.message}</span>`;
-          } else if (event.type === "status") {
-            resultDiv.innerHTML = `<span>⏳ ${event.message}</span>`;
-          } else if (event.type === "complete") {
-            const r = event.result;
-            const parts = [];
-            if (r.downloaded > 0) parts.push(`✅ Downloaded ${r.downloaded} new invoice(s)`);
-            if (r.skipped > 0) parts.push(`⏭ ${r.skipped} already present`);
-            if (r.processed > 0) parts.push(`📄 ${r.processed} processed by pipeline`);
-            if (r.errors && r.errors.length > 0) parts.push(`⚠️ ${r.errors.length} error(s)`);
-            if (parts.length === 0) parts.push("No new invoices to download.");
-            resultDiv.className = "fetch-result fetch-result-success";
-            resultDiv.innerHTML = parts.join("<br>");
-            if (r.downloaded > 0 || r.processed > 0) {
-              resultDiv.innerHTML += '<br><a href="/" class="btn btn-outline btn-sm" style="margin-top:8px">🔄 Refresh to see new documents</a>';
-            }
-          } else if (event.type === "error") {
-            resultDiv.className = "fetch-result fetch-result-error";
-            resultDiv.textContent = event.error;
-            revealCredFields(["spotify-sp-dc"], "spotify-saved-badge", "spotify-edit-btn");
-          }
-        }
-      }
-    } catch (err) {
-      resultDiv.className = "fetch-result fetch-result-error";
-      resultDiv.textContent = `Network error: ${err.message}`;
-    } finally {
-      releaseFetchLock();
-      btn.disabled = false;
-      btn.textContent = "🔄 Fetch invoices";
-    }
-  });
-}
-
-// === ChatGPT Invoice Fetch (SSE) ===
-const chatgptForm = document.getElementById("fetch-chatgpt-form");
-if (chatgptForm) {
-  chatgptForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    if (!acquireFetchLock("ChatGPT")) return;
-    const btn = document.getElementById("fetch-chatgpt-btn");
-    const resultDiv = document.getElementById("fetch-chatgpt-result");
-    const bearerInput = document.getElementById("chatgpt-bearer");
-    const bearerToken = bearerInput.hidden ? "" : bearerInput.value.trim();
-
-    if (!bearerInput.hidden && !bearerToken) return;
-
-    btn.disabled = true;
-    btn.textContent = "⏳ Fetching…";
-    resultDiv.hidden = false;
-    resultDiv.className = "fetch-result fetch-result-progress";
-    resultDiv.textContent = "Connecting to ChatGPT…";
-
-    try {
-      const formData = new FormData();
-      formData.append("bearer_token", bearerToken);
-
-      const resp = await fetch("/api/fetch-chatgpt", { method: "POST", body: formData });
-
-      if (!resp.ok && !resp.headers.get("content-type")?.includes("text/event-stream")) {
-        const data = await resp.json();
-        resultDiv.className = "fetch-result fetch-result-error";
-        resultDiv.textContent = data.error || "Unknown error occurred.";
-        revealCredFields(["chatgpt-bearer"], "chatgpt-saved-badge", "chatgpt-edit-btn");
-        btn.disabled = false;
-        btn.textContent = "🔄 Fetch invoices";
-        return;
-      }
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const event = JSON.parse(line.slice(6));
-
-          if (event.type === "progress") {
-            const pct = event.total > 0 ? Math.round((event.current / event.total) * 100) : 0;
-            resultDiv.innerHTML = `<div class="fetch-progress-bar"><div class="fetch-progress-fill" style="width:${pct}%"></div></div><span>${event.message}</span>`;
-          } else if (event.type === "status") {
-            resultDiv.innerHTML = `<span>⏳ ${event.message}</span>`;
-          } else if (event.type === "complete") {
-            const r = event.result;
-            const parts = [];
-            if (r.downloaded > 0) parts.push(`✅ Downloaded ${r.downloaded} new invoice(s)`);
-            if (r.skipped > 0) parts.push(`⏭ ${r.skipped} already present`);
-            if (r.processed > 0) parts.push(`📄 ${r.processed} processed by pipeline`);
-            if (r.errors && r.errors.length > 0) parts.push(`⚠️ ${r.errors.length} error(s)`);
-            if (parts.length === 0) parts.push("No new invoices to download.");
-            resultDiv.className = "fetch-result fetch-result-success";
-            resultDiv.innerHTML = parts.join("<br>");
-            if (r.downloaded > 0 || r.processed > 0) {
-              resultDiv.innerHTML += '<br><a href="/" class="btn btn-outline btn-sm" style="margin-top:8px">🔄 Refresh to see new documents</a>';
-            }
-          } else if (event.type === "error") {
-            resultDiv.className = "fetch-result fetch-result-error";
-            resultDiv.textContent = event.error;
-            revealCredFields(["chatgpt-bearer"], "chatgpt-saved-badge", "chatgpt-edit-btn");
-          }
-        }
-      }
-    } catch (err) {
-      resultDiv.className = "fetch-result fetch-result-error";
-      resultDiv.textContent = `Network error: ${err.message}`;
-    } finally {
-      releaseFetchLock();
-      btn.disabled = false;
-      btn.textContent = "🔄 Fetch invoices";
-    }
-  });
-}
+// === OVH fetch ===
+bindProviderFetch({
+  formId: "fetch-ovh-form", btnId: "fetch-ovh-btn", resultId: "fetch-ovh-result",
+  providerName: "OVH", endpoint: "/api/ovh-fetch", btnLabel: "📥 Fetch Invoices",
+  connectingMsg: "Connecting to OVH API…",
+  credInputIds: ["ovh-app-key", "ovh-app-secret", "ovh-consumer-key"], badgeId: "ovh-saved-badge", editBtnId: "ovh-edit-btn",
+  buildFormData: (creds) => { const fd = new FormData(); fd.append("app_key", creds["ovh-app-key"]); fd.append("app_secret", creds["ovh-app-secret"]); fd.append("consumer_key", creds["ovh-consumer-key"]); return fd; },
+});
 
 // === Free Mobile fetch (2-step: login + OTP) ===
 const freeLoginForm = document.getElementById("fetch-free-login-form");
@@ -830,38 +830,9 @@ if (freeLoginForm) {
         return;
       }
 
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const event = JSON.parse(line.slice(6));
-          if (event.type === "progress") {
-            const pct = Math.round((event.current / event.total) * 100);
-            resultDiv.innerHTML = `<div class="fetch-progress-bar"><div class="fetch-progress-fill" style="width:${pct}%"></div></div><span>${event.message}</span>`;
-          } else if (event.type === "status") {
-            resultDiv.textContent = event.message;
-          } else if (event.type === "complete") {
-            const r = event.result;
-            resultDiv.className = "fetch-result fetch-result-success";
-            let msg = `Done! ${r.downloaded} downloaded, ${r.skipped} skipped.`;
-            if (r.processed) msg += ` ${r.processed} processed.`;
-            if (r.message) msg += ` ${r.message}`;
-            if (r.errors && r.errors.length) msg += ` (${r.errors.length} errors)`;
-            resultDiv.textContent = msg;
-            otpForm.hidden = true;
-          } else if (event.type === "error") {
-            resultDiv.className = "fetch-result fetch-result-error";
-            resultDiv.textContent = event.error;
-          }
-        }
-      }
+      await readProviderSSE(resp, resultDiv, {
+        onComplete: (r, div) => { formatCompactComplete(r, div); otpForm.hidden = true; },
+      });
     } catch (err) {
       resultDiv.className = "fetch-result fetch-result-error";
       resultDiv.textContent = `Network error: ${err.message}`;
@@ -869,313 +840,6 @@ if (freeLoginForm) {
       releaseFetchLock();
       btn.disabled = false;
       btn.textContent = "✅ Validate & Fetch";
-    }
-  });
-}
-
-// === Orange/Sosh fetch (single step with Playwright) ===
-const orangeForm = document.getElementById("fetch-orange-form");
-if (orangeForm) {
-  orangeForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    if (!acquireFetchLock("Orange")) return;
-    const btn = document.getElementById("fetch-orange-btn");
-    const resultDiv = document.getElementById("fetch-orange-result");
-    const usernameInput = document.getElementById("orange-username");
-    const passwordInput = document.getElementById("orange-password");
-    const username = usernameInput.hidden ? "" : usernameInput.value.trim();
-    const password = passwordInput.hidden ? "" : passwordInput.value;
-
-    if (!usernameInput.hidden && (!username || !password)) return;
-    btn.disabled = true;
-    btn.textContent = "Fetching…";
-    resultDiv.hidden = false;
-    resultDiv.className = "fetch-result fetch-result-progress";
-    resultDiv.textContent = "Launching browser and authenticating… (15-30s)";
-
-    try {
-      const formData = new FormData();
-      formData.append("username", username);
-      formData.append("password", password);
-      const resp = await fetch("/api/orange-fetch", { method: "POST", body: formData });
-      if (!resp.ok) {
-        const data = await resp.json();
-        resultDiv.className = "fetch-result fetch-result-error";
-        resultDiv.textContent = data.error || `Server error: ${resp.status}`;
-        revealCredFields(["orange-username", "orange-password"], "orange-saved-badge", "orange-edit-btn");
-        return;
-      }
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const event = JSON.parse(line.slice(6));
-          if (event.type === "progress") {
-            const pct = Math.round((event.current / event.total) * 100);
-            resultDiv.innerHTML = `<div class="fetch-progress-bar"><div class="fetch-progress-fill" style="width:${pct}%"></div></div><span>${event.message}</span>`;
-          } else if (event.type === "status") {
-            resultDiv.textContent = event.message;
-          } else if (event.type === "complete") {
-            const r = event.result;
-            resultDiv.className = "fetch-result fetch-result-success";
-            let msg = `Done! ${r.downloaded} downloaded, ${r.skipped} skipped.`;
-            if (r.processed) msg += ` ${r.processed} processed.`;
-            if (r.message) msg += ` ${r.message}`;
-            if (r.errors && r.errors.length) msg += ` (${r.errors.length} errors)`;
-            resultDiv.textContent = msg;
-          } else if (event.type === "error") {
-            resultDiv.className = "fetch-result fetch-result-error";
-            resultDiv.textContent = event.error;
-            revealCredFields(["orange-username", "orange-password"], "orange-saved-badge", "orange-edit-btn");
-          }
-        }
-      }
-    } catch (err) {
-      resultDiv.className = "fetch-result fetch-result-error";
-      resultDiv.textContent = `Network error: ${err.message}`;
-    } finally {
-      releaseFetchLock();
-      btn.disabled = false;
-      btn.textContent = "📥 Fetch Invoices";
-    }
-  });
-}
-
-// === Sosh fetch (single step with Playwright, same as Orange) ===
-const soshForm = document.getElementById("fetch-sosh-form");
-if (soshForm) {
-  soshForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    if (!acquireFetchLock("Sosh")) return;
-    const btn = document.getElementById("fetch-sosh-btn");
-    const resultDiv = document.getElementById("fetch-sosh-result");
-    const usernameInput = document.getElementById("sosh-username");
-    const passwordInput = document.getElementById("sosh-password");
-    const username = usernameInput.hidden ? "" : usernameInput.value.trim();
-    const password = passwordInput.hidden ? "" : passwordInput.value;
-
-    if (!usernameInput.hidden && (!username || !password)) return;
-    btn.disabled = true;
-    btn.textContent = "Fetching…";
-    resultDiv.hidden = false;
-    resultDiv.className = "fetch-result fetch-result-progress";
-    resultDiv.textContent = "Launching browser and authenticating… (15-30s)";
-
-    try {
-      const formData = new FormData();
-      formData.append("username", username);
-      formData.append("password", password);
-      const resp = await fetch("/api/sosh-fetch", { method: "POST", body: formData });
-      if (!resp.ok) {
-        const data = await resp.json();
-        resultDiv.className = "fetch-result fetch-result-error";
-        resultDiv.textContent = data.error || `Server error: ${resp.status}`;
-        revealCredFields(["sosh-username", "sosh-password"], "sosh-saved-badge", "sosh-edit-btn");
-        return;
-      }
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const event = JSON.parse(line.slice(6));
-          if (event.type === "progress") {
-            const pct = Math.round((event.current / event.total) * 100);
-            resultDiv.innerHTML = `<div class="fetch-progress-bar"><div class="fetch-progress-fill" style="width:${pct}%"></div></div><span>${event.message}</span>`;
-          } else if (event.type === "status") {
-            resultDiv.textContent = event.message;
-          } else if (event.type === "complete") {
-            const r = event.result;
-            resultDiv.className = "fetch-result fetch-result-success";
-            let msg = `Done! ${r.downloaded} downloaded, ${r.skipped} skipped.`;
-            if (r.processed) msg += ` ${r.processed} processed.`;
-            if (r.message) msg += ` ${r.message}`;
-            if (r.errors && r.errors.length) msg += ` (${r.errors.length} errors)`;
-            resultDiv.textContent = msg;
-          } else if (event.type === "error") {
-            resultDiv.className = "fetch-result fetch-result-error";
-            resultDiv.textContent = event.error;
-            revealCredFields(["sosh-username", "sosh-password"], "sosh-saved-badge", "sosh-edit-btn");
-          }
-        }
-      }
-    } catch (err) {
-      resultDiv.className = "fetch-result fetch-result-error";
-      resultDiv.textContent = `Network error: ${err.message}`;
-    } finally {
-      releaseFetchLock();
-      btn.disabled = false;
-      btn.textContent = "📥 Fetch Invoices";
-    }
-  });
-}
-
-// === Freebox (ISP) fetch (single step, no OTP) ===
-const freeboxForm = document.getElementById("fetch-freebox-form");
-if (freeboxForm) {
-  freeboxForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    if (!acquireFetchLock("Freebox")) return;
-    const btn = document.getElementById("fetch-freebox-btn");
-    const resultDiv = document.getElementById("fetch-freebox-result");
-    const usernameInput = document.getElementById("freebox-username");
-    const passwordInput = document.getElementById("freebox-password");
-    const username = usernameInput.hidden ? "" : usernameInput.value.trim();
-    const password = passwordInput.hidden ? "" : passwordInput.value;
-
-    if (!usernameInput.hidden && (!username || !password)) return;
-    btn.disabled = true;
-    btn.textContent = "Fetching…";
-    resultDiv.hidden = false;
-    resultDiv.className = "fetch-result fetch-result-progress";
-    resultDiv.textContent = "Logging in to Freebox subscriber portal…";
-
-    try {
-      const formData = new FormData();
-      formData.append("username", username);
-      formData.append("password", password);
-      const resp = await fetch("/api/freebox-fetch", { method: "POST", body: formData });
-      if (!resp.ok) {
-        const data = await resp.json();
-        resultDiv.className = "fetch-result fetch-result-error";
-        resultDiv.textContent = data.error || `Server error: ${resp.status}`;
-        revealCredFields(["freebox-username", "freebox-password"], "freebox-saved-badge", "freebox-edit-btn");
-        return;
-      }
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const event = JSON.parse(line.slice(6));
-          if (event.type === "progress") {
-            const pct = Math.round((event.current / event.total) * 100);
-            resultDiv.innerHTML = `<div class="fetch-progress-bar"><div class="fetch-progress-fill" style="width:${pct}%"></div></div><span>${event.message}</span>`;
-          } else if (event.type === "status") {
-            resultDiv.textContent = event.message;
-          } else if (event.type === "complete") {
-            const r = event.result;
-            resultDiv.className = "fetch-result fetch-result-success";
-            let msg = `Done! ${r.downloaded} downloaded, ${r.skipped} skipped.`;
-            if (r.processed) msg += ` ${r.processed} processed.`;
-            if (r.message) msg += ` ${r.message}`;
-            if (r.errors && r.errors.length) msg += ` (${r.errors.length} errors)`;
-            resultDiv.textContent = msg;
-          } else if (event.type === "error") {
-            resultDiv.className = "fetch-result fetch-result-error";
-            resultDiv.textContent = event.error;
-            revealCredFields(["freebox-username", "freebox-password"], "freebox-saved-badge", "freebox-edit-btn");
-          }
-        }
-      }
-    } catch (err) {
-      resultDiv.className = "fetch-result fetch-result-error";
-      resultDiv.textContent = `Network error: ${err.message}`;
-    } finally {
-      releaseFetchLock();
-      btn.disabled = false;
-      btn.textContent = "📥 Fetch Invoices";
-    }
-  });
-}
-
-// === OVH fetch ===
-const ovhForm = document.getElementById("fetch-ovh-form");
-if (ovhForm) {
-  ovhForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    if (!acquireFetchLock("OVH")) return;
-    const btn = document.getElementById("fetch-ovh-btn");
-    const resultDiv = document.getElementById("fetch-ovh-result");
-    const appKeyInput = document.getElementById("ovh-app-key");
-    const appSecretInput = document.getElementById("ovh-app-secret");
-    const consumerKeyInput = document.getElementById("ovh-consumer-key");
-    const appKey = appKeyInput.hidden ? "" : appKeyInput.value.trim();
-    const appSecret = appSecretInput.hidden ? "" : appSecretInput.value.trim();
-    const consumerKey = consumerKeyInput.hidden ? "" : consumerKeyInput.value.trim();
-
-    if (!appKeyInput.hidden && (!appKey || !appSecret || !consumerKey)) return;
-    btn.disabled = true;
-    btn.textContent = "Fetching…";
-    resultDiv.hidden = false;
-    resultDiv.className = "fetch-result fetch-result-progress";
-    resultDiv.textContent = "Connecting to OVH API…";
-
-    try {
-      const formData = new FormData();
-      formData.append("app_key", appKey);
-      formData.append("app_secret", appSecret);
-      formData.append("consumer_key", consumerKey);
-      const resp = await fetch("/api/ovh-fetch", { method: "POST", body: formData });
-      if (!resp.ok) {
-        const data = await resp.json();
-        resultDiv.className = "fetch-result fetch-result-error";
-        resultDiv.textContent = data.error || `Server error: ${resp.status}`;
-        revealCredFields(["ovh-app-key", "ovh-app-secret", "ovh-consumer-key"], "ovh-saved-badge", "ovh-edit-btn");
-        return;
-      }
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const event = JSON.parse(line.slice(6));
-          if (event.type === "progress") {
-            const pct = Math.round((event.current / event.total) * 100);
-            resultDiv.innerHTML = `<div class="fetch-progress-bar"><div class="fetch-progress-fill" style="width:${pct}%"></div></div><span>${event.message}</span>`;
-          } else if (event.type === "status") {
-            resultDiv.textContent = event.message;
-          } else if (event.type === "complete") {
-            const r = event.result;
-            resultDiv.className = "fetch-result fetch-result-success";
-            let msg = `Done! ${r.downloaded} downloaded, ${r.skipped} skipped.`;
-            if (r.processed) msg += ` ${r.processed} processed.`;
-            if (r.message) msg += ` ${r.message}`;
-            if (r.errors && r.errors.length) msg += ` (${r.errors.length} errors)`;
-            resultDiv.textContent = msg;
-          } else if (event.type === "error") {
-            resultDiv.className = "fetch-result fetch-result-error";
-            resultDiv.textContent = event.error;
-            revealCredFields(["ovh-app-key", "ovh-app-secret", "ovh-consumer-key"], "ovh-saved-badge", "ovh-edit-btn");
-          }
-        }
-      }
-    } catch (err) {
-      resultDiv.className = "fetch-result fetch-result-error";
-      resultDiv.textContent = `Network error: ${err.message}`;
-    } finally {
-      releaseFetchLock();
-      btn.disabled = false;
-      btn.textContent = "📥 Fetch Invoices";
     }
   });
 }
@@ -1216,7 +880,6 @@ if (engieLoginForm) {
       }
 
       if (data.status === "otp_required") {
-        // Show OTP form
         document.getElementById("engie-session-cookies").value = data.session_cookies;
         document.getElementById("engie-factor-id").value = data.factor_id;
         document.getElementById("engie-user-id").value = data.user_id;
@@ -1270,38 +933,9 @@ if (engieOtpForm) {
         return;
       }
 
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const event = JSON.parse(line.slice(6));
-          if (event.type === "progress") {
-            const pct = Math.round((event.current / event.total) * 100);
-            resultDiv.innerHTML = `<div class="fetch-progress-bar"><div class="fetch-progress-fill" style="width:${pct}%"></div></div><span>${event.message}</span>`;
-          } else if (event.type === "status") {
-            resultDiv.textContent = event.message;
-          } else if (event.type === "complete") {
-            const r = event.result;
-            resultDiv.className = "fetch-result fetch-result-success";
-            let msg = `Done! ${r.downloaded} downloaded, ${r.skipped} skipped.`;
-            if (r.processed) msg += ` ${r.processed} processed.`;
-            if (r.message) msg += ` ${r.message}`;
-            if (r.errors && r.errors.length) msg += ` (${r.errors.length} errors)`;
-            resultDiv.textContent = msg;
-            document.getElementById("fetch-engie-otp-form").hidden = true;
-          } else if (event.type === "error") {
-            resultDiv.className = "fetch-result fetch-result-error";
-            resultDiv.textContent = event.error;
-          }
-        }
-      }
+      await readProviderSSE(resp, resultDiv, {
+        onComplete: (r, div) => { formatCompactComplete(r, div); document.getElementById("fetch-engie-otp-form").hidden = true; },
+      });
     } catch (err) {
       resultDiv.className = "fetch-result fetch-result-error";
       resultDiv.textContent = `Network error: ${err.message}`;
@@ -1309,6 +943,90 @@ if (engieOtpForm) {
       releaseFetchLock();
       btn.disabled = false;
       btn.textContent = "📥 Validate & Fetch";
+    }
+  });
+}
+
+// === Free Mobile auto-fetch (single-step via mailbox OTP) ===
+const freeAutoBtn = document.getElementById("fetch-free-auto-btn");
+if (freeAutoBtn) {
+  freeAutoBtn.addEventListener("click", async () => {
+    if (!acquireFetchLock("Free Mobile Auto")) return;
+    const resultDiv = document.getElementById("fetch-free-result");
+    const usernameInput = document.getElementById("free-username");
+    const passwordInput = document.getElementById("free-password");
+    const username = usernameInput.hidden ? "" : usernameInput.value.trim();
+    const password = passwordInput.hidden ? "" : passwordInput.value;
+
+    freeAutoBtn.disabled = true;
+    freeAutoBtn.textContent = "⏳ Auto-fetching…";
+    resultDiv.hidden = false;
+    resultDiv.className = "fetch-result fetch-result-progress";
+    resultDiv.textContent = "Logging in and waiting for OTP from mailbox…";
+
+    try {
+      const formData = new FormData();
+      formData.append("username", username);
+      formData.append("password", password);
+      const resp = await fetch("/api/free-mobile-auto", { method: "POST", body: formData });
+      if (!resp.ok) {
+        const data = await resp.json();
+        resultDiv.className = "fetch-result fetch-result-error";
+        resultDiv.textContent = data.error || `Server error: ${resp.status}`;
+        return;
+      }
+      await readProviderSSE(resp, resultDiv, {
+        onComplete: (r, div) => { formatCompactComplete(r, div); },
+      });
+    } catch (err) {
+      resultDiv.className = "fetch-result fetch-result-error";
+      resultDiv.textContent = `Network error: ${err.message}`;
+    } finally {
+      releaseFetchLock();
+      freeAutoBtn.disabled = false;
+      freeAutoBtn.textContent = "🤖 Auto-fetch";
+    }
+  });
+}
+
+// === Engie Pro auto-fetch (single-step via mailbox OTP) ===
+const engieAutoBtn = document.getElementById("fetch-engie-auto-btn");
+if (engieAutoBtn) {
+  engieAutoBtn.addEventListener("click", async () => {
+    if (!acquireFetchLock("Engie Pro Auto")) return;
+    const resultDiv = document.getElementById("fetch-engie-result");
+    const emailInput = document.getElementById("engie-email");
+    const passwordInput = document.getElementById("engie-password");
+    const email = emailInput.hidden ? "" : emailInput.value.trim();
+    const password = passwordInput.hidden ? "" : passwordInput.value;
+
+    engieAutoBtn.disabled = true;
+    engieAutoBtn.textContent = "⏳ Auto-fetching…";
+    resultDiv.hidden = false;
+    resultDiv.className = "fetch-result fetch-result-progress";
+    resultDiv.textContent = "Logging in and waiting for OTP from mailbox…";
+
+    try {
+      const formData = new FormData();
+      formData.append("email", email);
+      formData.append("password", password);
+      const resp = await fetch("/api/engie-auto", { method: "POST", body: formData });
+      if (!resp.ok) {
+        const data = await resp.json();
+        resultDiv.className = "fetch-result fetch-result-error";
+        resultDiv.textContent = data.error || `Server error: ${resp.status}`;
+        return;
+      }
+      await readProviderSSE(resp, resultDiv, {
+        onComplete: (r, div) => { formatCompactComplete(r, div); document.getElementById("fetch-engie-otp-form").hidden = true; },
+      });
+    } catch (err) {
+      resultDiv.className = "fetch-result fetch-result-error";
+      resultDiv.textContent = `Network error: ${err.message}`;
+    } finally {
+      releaseFetchLock();
+      engieAutoBtn.disabled = false;
+      engieAutoBtn.textContent = "🤖 Auto-fetch";
     }
   });
 }
@@ -1439,7 +1157,7 @@ if (exportAllBtn) {
   function open(mailId, subject) {
     frame.src = `/mails/${mailId}/pdf-preview`;
     titleEl.textContent = `PDF Preview — ${subject}`;
-    saveForm.action = `/mails/${mailId}/to-pdf`;
+    saveForm.dataset.action = `/mails/${mailId}/to-pdf`;
     modal.hidden = false;
   }
 
@@ -1447,6 +1165,22 @@ if (exportAllBtn) {
     modal.hidden = true;
     frame.src = "about:blank";
   }
+
+  // Async form submission — close modal immediately, process in background
+  saveForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const url = saveForm.dataset.action;
+    const btn = saveForm.querySelector("button[type=submit]");
+    btn.disabled = true;
+    btn.textContent = "⏳ Processing…";
+    close();
+    try {
+      await fetch(url, { method: "POST", redirect: "manual" });
+    } catch (_) { /* ignore network errors */ }
+    btn.disabled = false;
+    btn.textContent = "✓ Process & save document";
+    setTimeout(() => refreshDocumentsPanel(), 300);
+  });
 
   document.addEventListener("click", (e) => {
     const btn = e.target.closest(".mail-to-pdf-btn");
@@ -1531,6 +1265,12 @@ async function refreshDocumentsPanel() {
       const currentTab = document.querySelector(`.tab[data-tab="${tab.dataset.tab}"] .tab-count`);
       if (currentTab) currentTab.textContent = freshCount.textContent;
     }
+  });
+  // Update wizard step status subtitles
+  ["mail", "fetch", "folder", "triage", "rename", "export"].forEach(step => {
+    const freshStatus = doc.getElementById(`wizard-status-${step}`);
+    const currentStatus = document.getElementById(`wizard-status-${step}`);
+    if (freshStatus && currentStatus) currentStatus.textContent = freshStatus.textContent;
   });
   // Re-bind dismiss buttons on fresh fetch panel
   document.querySelectorAll(".dismiss-provider-btn").forEach(btn => {
