@@ -585,6 +585,8 @@
                   <div class="kanban-card-actions">
                     <form method="post" action="/documents/{{ document.id }}/status" class="inline-form">
                       <input type="hidden" name="status" value="doc_included"><button type="submit" class="btn btn-primary btn-xs">✓ Include</button>
+                    </form>
+                    <form method="post" action="/documents/{{ document.id }}/status" class="inline-form">
                       <input type="hidden" name="status" value="review_ignored"><button type="submit" class="btn btn-ghost btn-xs">✗ Skip</button>
                     </form>
                     <button type="button" class="btn btn-outline btn-xs inline-rename-toggle"
