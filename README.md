@@ -38,6 +38,7 @@ Built-in scrapers for common service providers:
 - **Orange / Sosh** — mobile plan invoices
 - **OVH** — cloud hosting invoices
 - **Engie** — energy bills with OTP support
+- **Henrri** — invoicing platform API (sale invoices with PDF download)
 
 Each fetcher authenticates (with encrypted stored credentials), downloads new invoices, and feeds them into the pipeline automatically. Credentials are encrypted at rest with a Fernet key derived from the local database path.
 
@@ -115,6 +116,10 @@ compta-auto add-provider --vendor OpenAI --url https://platform.openai.com/...
 compta-auto inqom-upload
 compta-auto inqom-upload --dry-run --type purchase
 
+# List / download Henrri invoices
+compta-auto henrri-invoices --type all
+compta-auto henrri-invoices --type Invoice --download-pdf ./invoices
+
 # Explore Inqom UI interactively (debug)
 compta-auto inqom-explore
 ```
@@ -143,6 +148,9 @@ All settings via environment variables or a `.env` file at the project root:
 | `COMPTA_INQOM_CLIENT_ID` | *(empty)* | Inqom enterprise/client ID |
 | `COMPTA_INQOM_FISCAL_YEAR_START_MONTH` | `8` | Fiscal year start (1=Jan, 8=Aug) |
 | `COMPTA_SALE_VENDOR_MARKERS` | *(empty)* | Comma-separated vendor keywords that indicate a "sale" invoice |
+| `COMPTA_HENRRI_CLIENT_ID` | *(none)* | Henrri API client ID |
+| `COMPTA_HENRRI_CLIENT_SECRET` | *(none)* | Henrri API client secret |
+| `COMPTA_HENRRI_BASE_URL` | `https://api-sandbox.henrri.io/v1` | Henrri API base URL (switch to `https://api.henrri.io/v1` for production) |
 
 ### Custom Extractor Command
 
@@ -206,6 +214,7 @@ src/compta_auto/
 ├── engie_invoices.py
 ├── free_invoices.py
 ├── freebox_invoices.py
+├── henrri_invoices.py
 ├── openai_invoices.py
 ├── orange_invoices.py
 ├── ovh_invoices.py
