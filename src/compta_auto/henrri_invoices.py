@@ -15,6 +15,7 @@ from typing import Any, Generator
 HENRRI_SANDBOX_BASE = "https://api-sandbox.henrri.io/v1"
 _ALLOWED_DOWNLOAD_HOSTS_SUFFIX = ".henrri.io"
 _MAX_PDF_SIZE = 50 * 1024 * 1024  # 50 MB
+_REQUEST_TIMEOUT = 30  # seconds
 TOKEN_TTL_SECONDS = 600
 
 
@@ -46,7 +47,7 @@ class HenrriClient:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT) as resp:
             data = json.loads(resp.read().decode())
         return HenrriToken(
             access_token=data["access_token"],
@@ -74,7 +75,7 @@ class HenrriClient:
             },
             method=method,
         )
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT) as resp:
             return json.loads(resp.read().decode())
 
     def list_documents(
@@ -147,7 +148,7 @@ class HenrriClient:
             },
             method="POST",
         )
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT) as resp:
             return json.loads(resp.read().decode())
 
     def download_pdf(self, document_id: int, output_path: Path) -> Path:
@@ -177,7 +178,7 @@ class HenrriClient:
             method="GET",
         )
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT) as resp:
             # Stream to file with size cap to avoid memory exhaustion
             with open(output_path, "wb") as f:
                 bytes_written = 0
