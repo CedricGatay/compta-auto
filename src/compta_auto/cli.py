@@ -47,6 +47,10 @@ def main() -> None:
         "--type", default="Invoice", dest="doc_type",
         help="Document type filter (Invoice, Quotation, CreditNote, all). Default: Invoice",
     )
+    henrri.add_argument(
+        "--download-pdf", default=None, metavar="DIR",
+        help="Download PDFs for listed documents into this directory",
+    )
 
     args = parser.parse_args()
     settings = get_settings()
@@ -91,6 +95,19 @@ def main() -> None:
                     f"{doc.get('identity') or '-':<14} {date_str:<12} {doc_type:<12} "
                     f"{cust_name:<28} {ht:>10} {ttc:>10}"
                 )
+            if args.download_pdf:
+                pdf_dir = Path(args.download_pdf)
+                print(f"\nDownloading PDFs to {pdf_dir}/...")
+                for doc in elements:
+                    doc_id = doc["id"]
+                    identity = doc.get("identity") or f"doc-{doc_id}"
+                    safe_name = identity.replace("/", "-").replace(" ", "_")
+                    out_path = pdf_dir / f"{safe_name}.pdf"
+                    try:
+                        client.download_pdf(doc_id, out_path)
+                        print(f"  ✓ {out_path}")
+                    except Exception as e:
+                        print(f"  ✗ {identity}: {e}", file=sys.stderr)
         return
 
     db = Database(settings.db_path)

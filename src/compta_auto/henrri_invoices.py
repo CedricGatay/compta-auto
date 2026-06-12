@@ -8,6 +8,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 
@@ -129,6 +130,41 @@ class HenrriClient:
     def get_document(self, document_id: int) -> dict[str, Any]:
         """Get a single document by ID."""
         return self._request("GET", f"/documents/{document_id}")
+
+    def get_pdf_url(self, document_id: int) -> dict[str, Any]:
+        """Generate PDF and get a temporary download URL (valid 10 min)."""
+        url = f"{self.base_url}/documents/{document_id}/pdf/url"
+        token = self._get_token()
+        req = urllib.request.Request(
+            url,
+            data=b"",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json",
+                "Content-Length": "0",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req) as resp:
+            return json.loads(resp.read().decode())
+
+    def download_pdf(self, document_id: int, output_path: Path) -> Path:
+        """Download document PDF to a local file. Returns the output path."""
+        pdf_info = self.get_pdf_url(document_id)
+        download_url = pdf_info["downloadUrl"]
+        token = self._get_token()
+        req = urllib.request.Request(
+            download_url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/octet-stream",
+            },
+            method="GET",
+        )
+        with urllib.request.urlopen(req) as resp:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(resp.read())
+        return output_path
 
 
 def list_henrri_invoices(
