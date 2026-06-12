@@ -9,7 +9,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Generator
 
 
 HENRRI_SANDBOX_BASE = "https://api-sandbox.henrri.io/v1"
@@ -171,12 +171,13 @@ def list_henrri_invoices(
     client_id: str,
     client_secret: str,
     *,
+    base_url: str = HENRRI_SANDBOX_BASE,
     limit: int = 50,
     from_date: str | None = None,
     to_date: str | None = None,
 ) -> list[dict[str, Any]]:
     """Convenience function: fetch all invoices and return simplified records."""
-    client = HenrriClient(client_id, client_secret)
+    client = HenrriClient(client_id, client_secret, base_url=base_url)
     result = client.list_invoices(limit=limit, from_date=from_date, to_date=to_date)
 
     invoices = []
@@ -196,3 +197,94 @@ def list_henrri_invoices(
             "finalized": doc.get("finalized"),
         })
     return invoices
+
+
+def fetch_henrri_invoices_stream(
+    client_id: str,
+    client_secret: str,
+    output_dir: Path,
+    *,
+    base_url: str = HENRRI_SANDBOX_BASE,
+) -> Generator[dict, None, None]:
+    """Fetch all finalized Henrri invoices as PDFs.
+
+    Yields progress events compatible with run_provider_fetch.
+    """
+    env_label = "sandbox" if "sandbox" in base_url else "production"
+    yield {"type": "status", "message": f"Connecting to Henrri API ({env_label})…"}
+
+    try:
+        client = HenrriClient(client_id, client_secret, base_url=base_url)
+        # Fetch all finalized invoices (paginate)
+        all_docs: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            result = client.list_documents(
+                page=page,
+                limit=50,
+                document_types=["Invoice"],
+                finalized=True,
+                sort_by="date",
+                sort_order="descending",
+            )
+            elements = result.get("elements", [])
+            all_docs.extend(elements)
+            meta = result.get("meta", {})
+            if not meta.get("hasNext", False):
+                break
+            page += 1
+    except urllib.error.HTTPError as e:
+        yield {"type": "error", "error": f"Henrri API error: {e.code} {e.reason}"}
+        return
+    except Exception as e:
+        yield {"type": "error", "error": f"Henrri connection error: {e}"}
+        return
+
+    if not all_docs:
+        yield {"type": "done", "result": {
+            "total": 0, "downloaded": 0, "skipped": 0, "errors": [],
+            "message": "No finalized invoices found on Henrri.",
+        }}
+        return
+
+    yield {"type": "status", "message": f"Found {len(all_docs)} invoice(s), downloading PDFs…"}
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    total = len(all_docs)
+    downloaded = 0
+    skipped = 0
+    errors: list[str] = []
+
+    for i, doc in enumerate(all_docs, 1):
+        doc_id = doc["id"]
+        identity = doc.get("identity") or f"doc-{doc_id}"
+        date_str = (doc.get("date") or "")[:10].replace("-", "_")
+        customer = (doc.get("customer") or {}).get("name", "henrri")
+        safe_customer = customer.replace(" ", "_").replace("/", "-")[:20]
+        safe_identity = identity.replace("/", "-").replace(" ", "_")
+        filename = f"henrri_{date_str}_{safe_customer}_{safe_identity}.pdf"
+        output_path = output_dir / filename
+
+        yield {
+            "type": "progress",
+            "current": i,
+            "total": total,
+            "message": f"Processing invoice {i}/{total} ({identity})…",
+        }
+
+        if output_path.exists():
+            skipped += 1
+            continue
+
+        try:
+            client.download_pdf(doc_id, output_path)
+            downloaded += 1
+        except Exception as e:
+            errors.append(f"{identity}: {e}")
+
+    yield {"type": "done", "result": {
+        "total": total,
+        "downloaded": downloaded,
+        "skipped": skipped,
+        "errors": errors,
+    }}

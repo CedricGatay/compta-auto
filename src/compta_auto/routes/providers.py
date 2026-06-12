@@ -393,3 +393,35 @@ def api_engie_auto(
             yield f"data: {json.dumps({'type': 'error', 'error': 'Auto-fetch failed. Check server logs.'})}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/henrri-fetch")
+def api_henrri_fetch(
+    client_id: str = Form(""),
+    client_secret: str = Form(""),
+    repo: Repository = Depends(get_repo),
+    settings: Settings = Depends(get_settings),
+    fernet: Fernet = Depends(get_fernet),
+) -> StreamingResponse:
+    """Fetch all finalized Henrri invoices."""
+    from ..henrri_invoices import fetch_henrri_invoices_stream
+
+    effective_id = get_credential(repo, "henrri_client_id", client_id, fernet=fernet)
+    effective_secret = get_credential(repo, "henrri_client_secret", client_secret, fernet=fernet)
+    if not effective_id or not effective_secret:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Henrri API credentials required (client ID and client secret)."},
+        )
+
+    save_credential(repo, "henrri_client_id", effective_id, fernet=fernet)
+    save_credential(repo, "henrri_client_secret", effective_secret, fernet=fernet)
+
+    stream = fetch_henrri_invoices_stream(
+        effective_id, effective_secret, settings.raw_dir,
+        base_url=settings.henrri_base_url,
+    )
+    return StreamingResponse(
+        run_provider_fetch(stream, settings, repo, "henrri", accounting_type="sale"),
+        media_type="text/event-stream",
+    )

@@ -1005,6 +1005,24 @@
           </form>
           <div id="fetch-engie-result" class="fetch-result" hidden></div>
         </section>
+
+        <section class="fetch-section">
+          <h3>📄 Henrri{% if henrri_is_sandbox %} <span class="badge badge-warning">Sandbox</span>{% endif %}<span class="badge badge-info provider-hint-badge" data-provider-hint="henrri" {% if not provider_hint_counts.get('henrri') %}hidden{% endif %}>📬 {{ provider_hint_counts.get('henrri', 0) }}</span>{% if last_fetch.henrri %}<span class="last-fetch-badge">Last: {{ last_fetch.henrri[:16] }}</span>{% endif %}</h3>
+          <p class="fetch-description">
+            Download all finalized invoices from Henrri{% if henrri_is_sandbox %} <strong>(⚠️ sandbox environment — not production data)</strong>{% endif %}.
+            Requires API credentials (Client ID &amp; Client Secret) from your Henrri account.
+          </p>
+          <form id="fetch-henrri-form" class="fetch-form">
+            <div class="fetch-input-row">
+              <span class="cred-saved-badge" id="henrri-saved-badge" hidden>🔑 Saved</span>
+              <input type="text" name="client_id" id="henrri-client-id" placeholder="Client ID" autocomplete="off" style="max-width:300px">
+              <input type="password" name="client_secret" id="henrri-client-secret" placeholder="Client Secret" autocomplete="off" style="max-width:300px">
+              <button type="submit" class="btn btn-primary" id="fetch-henrri-btn">📥 Fetch Invoices</button>
+              <button type="button" class="btn btn-sm btn-link cred-edit-btn" id="henrri-edit-btn" hidden>✏️</button>
+            </div>
+          </form>
+          <div id="fetch-henrri-result" class="fetch-result" hidden></div>
+        </section>
         </div>
       </div>
       <div class="panel-home" data-panel-home="export">

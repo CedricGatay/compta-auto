@@ -68,7 +68,7 @@ def main() -> None:
         if not settings.henrri_client_id or not settings.henrri_client_secret:
             print("Error: Set COMPTA_HENRRI_CLIENT_ID and COMPTA_HENRRI_CLIENT_SECRET in .env")
             sys.exit(1)
-        client = HenrriClient(settings.henrri_client_id, settings.henrri_client_secret)
+        client = HenrriClient(settings.henrri_client_id, settings.henrri_client_secret, base_url=settings.henrri_base_url)
         doc_types = None if args.doc_type == "all" else [args.doc_type]
         result = client.list_documents(
             limit=args.limit,

@@ -547,7 +547,8 @@ let fetchInProgress = false;
 let fetchInProgressProvider = "";
 const ALL_FETCH_BTNS = [
   "fetch-spotify-btn", "fetch-chatgpt-btn", "fetch-free-login-btn", "fetch-free-otp-btn", "fetch-free-auto-btn",
-  "fetch-orange-btn", "fetch-sosh-btn", "fetch-freebox-btn", "fetch-ovh-btn", "fetch-engie-login-btn", "fetch-engie-otp-btn", "fetch-engie-auto-btn",
+  "fetch-orange-btn", "fetch-sosh-btn", "fetch-freebox-btn", "fetch-ovh-btn", "fetch-henrri-btn",
+  "fetch-engie-login-btn", "fetch-engie-otp-btn", "fetch-engie-auto-btn",
   "inqom-upload-btn"
 ];
 
@@ -746,6 +747,15 @@ bindProviderFetch({
   connectingMsg: "Connecting to OVH API…",
   credInputIds: ["ovh-app-key", "ovh-app-secret", "ovh-consumer-key"], badgeId: "ovh-saved-badge", editBtnId: "ovh-edit-btn",
   buildFormData: (creds) => { const fd = new FormData(); fd.append("app_key", creds["ovh-app-key"]); fd.append("app_secret", creds["ovh-app-secret"]); fd.append("consumer_key", creds["ovh-consumer-key"]); return fd; },
+});
+
+// === Henrri fetch ===
+bindProviderFetch({
+  formId: "fetch-henrri-form", btnId: "fetch-henrri-btn", resultId: "fetch-henrri-result",
+  providerName: "Henrri", endpoint: "/api/henrri-fetch", btnLabel: "📥 Fetch Invoices",
+  connectingMsg: "Connecting to Henrri API…",
+  credInputIds: ["henrri-client-id", "henrri-client-secret"], badgeId: "henrri-saved-badge", editBtnId: "henrri-edit-btn",
+  buildFormData: (creds) => { const fd = new FormData(); fd.append("client_id", creds["henrri-client-id"]); fd.append("client_secret", creds["henrri-client-secret"]); return fd; },
 });
 
 // === Free Mobile fetch (2-step: login + OTP) ===

@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     sale_vendor_markers: str = ""  # comma-separated list of vendor keywords indicating sale invoices
     henrri_client_id: str | None = None
     henrri_client_secret: str | None = None
+    henrri_base_url: str = "https://api-sandbox.henrri.io/v1"
 
     @property
     def accounting_recipient_suffix(self) -> str:

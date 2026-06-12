@@ -69,6 +69,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             provider: repo.get_app_state(f"last_fetch_{provider}") or ""
             for provider in (
                 "spotify", "openai", "free_mobile", "orange", "sosh", "freebox", "ovh", "engie",
+                "henrri",
             )
         }
         return templates.TemplateResponse(
@@ -86,6 +87,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "last_fetch": last_fetch,
                 "provider_hint_counts": repo.count_provider_hints(),
                 "missing_providers": repo.list_missing_providers(),
+                "henrri_is_sandbox": "sandbox" in app_settings.henrri_base_url,
             },
         )
 
