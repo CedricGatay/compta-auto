@@ -13,6 +13,8 @@ from typing import Any, Generator
 
 
 HENRRI_SANDBOX_BASE = "https://api-sandbox.henrri.io/v1"
+_ALLOWED_DOWNLOAD_HOSTS_SUFFIX = ".henrri.io"
+_MAX_PDF_SIZE = 50 * 1024 * 1024  # 50 MB
 TOKEN_TTL_SECONDS = 600
 
 
@@ -152,6 +154,19 @@ class HenrriClient:
         """Download document PDF to a local file. Returns the output path."""
         pdf_info = self.get_pdf_url(document_id)
         download_url = pdf_info["downloadUrl"]
+
+        # Validate URL to prevent SSRF
+        parsed = urllib.parse.urlparse(download_url)
+        if parsed.scheme != "https" or not (
+            parsed.hostname and (
+                parsed.hostname == "henrri.io"
+                or parsed.hostname.endswith(_ALLOWED_DOWNLOAD_HOSTS_SUFFIX)
+            )
+        ):
+            raise ValueError(
+                f"Refusing to download from untrusted URL: {download_url}"
+            )
+
         token = self._get_token()
         req = urllib.request.Request(
             download_url,
@@ -161,9 +176,20 @@ class HenrriClient:
             },
             method="GET",
         )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         with urllib.request.urlopen(req) as resp:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_bytes(resp.read())
+            # Stream to file with size cap to avoid memory exhaustion
+            with open(output_path, "wb") as f:
+                bytes_written = 0
+                while chunk := resp.read(8192):
+                    bytes_written += len(chunk)
+                    if bytes_written > _MAX_PDF_SIZE:
+                        f.close()
+                        output_path.unlink(missing_ok=True)
+                        raise ValueError(
+                            f"PDF for document {document_id} exceeds {_MAX_PDF_SIZE // (1024*1024)}MB limit"
+                        )
+                    f.write(chunk)
         return output_path
 
 
