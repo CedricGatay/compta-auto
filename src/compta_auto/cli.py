@@ -39,6 +39,15 @@ def main() -> None:
     inqom_upload.add_argument("--dry-run", action="store_true")
     inqom_upload.add_argument("--type", choices=["purchase", "sale", "all"], default="all")
 
+    henrri = subparsers.add_parser("henrri-invoices", help="List invoices from Henrri")
+    henrri.add_argument("--limit", type=int, default=50)
+    henrri.add_argument("--from-date", default=None, help="Filter from date (YYYY-MM-DD)")
+    henrri.add_argument("--to-date", default=None, help="Filter to date (YYYY-MM-DD)")
+    henrri.add_argument(
+        "--type", default="Invoice", dest="doc_type",
+        help="Document type filter (Invoice, Quotation, CreditNote, all). Default: Invoice",
+    )
+
     args = parser.parse_args()
     settings = get_settings()
 
@@ -48,6 +57,40 @@ def main() -> None:
             print("Error: Set COMPTA_INQOM_EMAIL and COMPTA_INQOM_PASSWORD in .env")
             sys.exit(1)
         explore_inqom_ui(settings.inqom_email, settings.inqom_password)
+        return
+
+    if args.command == "henrri-invoices":
+        from .henrri_invoices import HenrriClient
+        if not settings.henrri_client_id or not settings.henrri_client_secret:
+            print("Error: Set COMPTA_HENRRI_CLIENT_ID and COMPTA_HENRRI_CLIENT_SECRET in .env")
+            sys.exit(1)
+        client = HenrriClient(settings.henrri_client_id, settings.henrri_client_secret)
+        doc_types = None if args.doc_type == "all" else [args.doc_type]
+        result = client.list_documents(
+            limit=args.limit,
+            document_types=doc_types,
+            from_date=args.from_date,
+            to_date=args.to_date,
+            sort_by="date",
+            sort_order="descending",
+        )
+        elements = result.get("elements", [])
+        if not elements:
+            print("No documents found.")
+        else:
+            print(f"{'Number':<14} {'Date':<12} {'Type':<12} {'Customer':<28} {'HT':>10} {'TTC':>10}")
+            print("-" * 90)
+            for doc in elements:
+                customer = doc.get("customer") or {}
+                date_str = (doc.get("date") or "")[:10]
+                cust_name = (customer.get("name") or "N/A")[:26]
+                ht = f"{doc['priceBeforeTax']:.2f}" if doc.get("priceBeforeTax") is not None else "-"
+                ttc = f"{doc['priceAfterTax']:.2f}" if doc.get("priceAfterTax") is not None else "-"
+                doc_type = (doc.get("type") or "-")[:10]
+                print(
+                    f"{doc.get('identity') or '-':<14} {date_str:<12} {doc_type:<12} "
+                    f"{cust_name:<28} {ht:>10} {ttc:>10}"
+                )
         return
 
     db = Database(settings.db_path)

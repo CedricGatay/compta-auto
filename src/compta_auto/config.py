@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     inqom_client_id: str = ""
     inqom_fiscal_year_start_month: int = 8
     sale_vendor_markers: str = ""  # comma-separated list of vendor keywords indicating sale invoices
+    henrri_client_id: str | None = None
+    henrri_client_secret: str | None = None
 
     @property
     def accounting_recipient_suffix(self) -> str:
