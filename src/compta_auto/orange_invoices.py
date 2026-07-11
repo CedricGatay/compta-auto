@@ -27,6 +27,60 @@ _API_HEADERS = {
 }
 
 
+def _fetch_json(page, url: str, headers: dict[str, str], context: str) -> dict:
+    """Fetch JSON from the authenticated browser context with useful diagnostics."""
+    result = page.evaluate(
+        """async (args) => {
+            const response = await fetch(args.url, {headers: args.headers});
+            const contentType = response.headers.get("content-type") || "";
+            const text = await response.text();
+            if (!response.ok) {
+                return {
+                    ok: false,
+                    status: response.status,
+                    contentType,
+                    text: text.slice(0, 300),
+                };
+            }
+            try {
+                return {
+                    ok: true,
+                    status: response.status,
+                    contentType,
+                    data: JSON.parse(text),
+                };
+            } catch (error) {
+                return {
+                    ok: false,
+                    status: response.status,
+                    contentType,
+                    parseError: String(error && error.message ? error.message : error),
+                    text: text.slice(0, 300),
+                };
+            }
+        }""",
+        {"url": url, "headers": headers},
+    )
+    if not isinstance(result, dict) or not result.get("ok"):
+        status = result.get("status", "unknown") if isinstance(result, dict) else "unknown"
+        content_type = (
+            result.get("contentType", "unknown") if isinstance(result, dict) else "unknown"
+        )
+        parse_error = result.get("parseError") if isinstance(result, dict) else None
+        preview = result.get("text", "") if isinstance(result, dict) else str(result)
+        reason = f"HTTP {status}, content-type {content_type}"
+        if parse_error:
+            reason += f", parse error: {parse_error}"
+        if preview:
+            reason += f", response preview: {preview[:160]}"
+        raise AuthError(f"{context} returned an unexpected response ({reason}).")
+
+    data = result.get("data")
+    if not isinstance(data, dict):
+        raise AuthError(f"{context} returned unexpected JSON shape.")
+    return data
+
+
 def _launch_and_login(username: str, password: str):
     """Launch Playwright, authenticate, return (page, browser, pw).
 
@@ -115,16 +169,21 @@ def _get_contract_id(page) -> str:
     headers = {**_API_HEADERS, "X-Orange-Session-Id": session_id,
                "X-Orange-Request-Id": str(uuid.uuid4()),
                "Accept": "application/json;version=1"}
-    portfolio = page.evaluate(
-        """(headers) => fetch('/ecd_wp/portfoliomanager/portfolio'
-            + '?filter=telco,security&includeContracts=true&includeFamilies=true'
-            + '&includeServices=true', {headers})
-            .then(r => r.json())""",
+    portfolio = _fetch_json(
+        page,
+        "/ecd_wp/portfoliomanager/portfolio"
+        "?filter=telco,security&includeContracts=true&includeFamilies=true"
+        "&includeServices=true",
         headers,
+        "Orange portfolio API",
     )
     # Extract first contract ID from the contracts list
     contracts = portfolio.get("contracts", [])
+    if not isinstance(contracts, list):
+        raise AuthError("Orange portfolio API returned an unexpected contracts shape.")
     for contract in contracts:
+        if not isinstance(contract, dict):
+            continue
         cid = contract.get("cid") or contract.get("contractId") or contract.get("id")
         if cid:
             return str(cid)
@@ -148,15 +207,18 @@ def _fetch_bills(page, contract_id: str) -> list[dict]:
     url = (f"/ecd_wp/facture/v2.0/billsAndPaymentInfos/users/current"
            f"/contracts/{contract_id}?detail=true")
 
-    data = page.evaluate(
-        "(args) => fetch(args.url, {headers: args.headers}).then(r => r.json())",
-        {"url": url, "headers": headers},
-    )
+    data = _fetch_json(page, url, headers, "Orange bills API")
 
     if "error" in data:
-        raise AuthError(f"Bills API error: {data['error'].get('technicalDescription', 'unknown')}")
+        error = data["error"] if isinstance(data["error"], dict) else {}
+        raise AuthError(f"Bills API error: {error.get('technicalDescription', 'unknown')}")
 
-    bills = data.get("billsHistory", {}).get("billList", [])
+    bills_history = data.get("billsHistory", {})
+    if not isinstance(bills_history, dict):
+        raise AuthError("Orange bills API returned an unexpected billsHistory shape.")
+    bills = bills_history.get("billList", [])
+    if not isinstance(bills, list):
+        raise AuthError("Orange bills API returned an unexpected billList shape.")
     return bills
 
 

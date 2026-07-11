@@ -1722,6 +1722,7 @@ button.preview { color: inherit; cursor: pointer; padding: 0; }
   gap: 4px;
   align-items: center;
 }
+.export-status-panel { margin-bottom: 18px; }
 #inqom-upload-result { margin-top: 12px; }
 
 /* === PDF PREVIEW MODAL === */

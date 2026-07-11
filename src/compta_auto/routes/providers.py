@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 
 from cryptography.fernet import Fernet
 from fastapi import APIRouter, Depends, Form, HTTPException
@@ -311,12 +312,13 @@ def api_free_mobile_auto(
     def event_stream():
         try:
             yield f"data: {json.dumps({'type': 'status', 'message': 'Logging in to Free Mobile…'})}\n\n"
+            otp_requested_at = datetime.now(timezone.utc)
             session_cookies, csrf_token, otp_id = login(effective_user, effective_pass)
             save_credential(repo, "free_username", effective_user, fernet=fernet)
             save_credential(repo, "free_password", effective_pass, fernet=fernet)
 
             yield f"data: {json.dumps({'type': 'status', 'message': 'Waiting for OTP email in mailbox…'})}\n\n"
-            otp_code = read_free_mobile_otp(timeout=90)
+            otp_code = read_free_mobile_otp(timeout=180, started_at=otp_requested_at)
 
             yield f"data: {json.dumps({'type': 'status', 'message': f'OTP code retrieved, validating…'})}\n\n"
             stream = fetch_free_invoices_stream(
@@ -354,6 +356,7 @@ def api_engie_auto(
     def event_stream():
         try:
             yield f"data: {json.dumps({'type': 'status', 'message': 'Logging in to Engie Pro…'})}\n\n"
+            otp_requested_at = datetime.now(timezone.utc)
             session_cookies, factor_id, user_id, form_build_id = login(effective_email, effective_pass)
             save_credential(repo, "engie_email", effective_email, fernet=fernet)
             save_credential(repo, "engie_password", effective_pass, fernet=fernet)
@@ -377,7 +380,7 @@ def api_engie_auto(
                 return
 
             yield f"data: {json.dumps({'type': 'status', 'message': 'Waiting for OTP email in mailbox…'})}\n\n"
-            otp_code = read_engie_otp(timeout=90)
+            otp_code = read_engie_otp(timeout=180, started_at=otp_requested_at)
 
             yield f"data: {json.dumps({'type': 'status', 'message': f'OTP code retrieved, validating…'})}\n\n"
             stream = fetch_engie_invoices_stream(

@@ -20,6 +20,16 @@ from ..repositories import Repository
 from .deps import get_repo, get_settings
 
 router = APIRouter(tags=["documents"])
+EXPORT_READY_STATUSES = ("doc_included", "uploaded_to_inqom")
+
+
+def list_export_ready_documents(repo: Repository) -> list[dict]:
+    """Return documents ready for local export."""
+    documents: list[dict] = []
+    for status in EXPORT_READY_STATUSES:
+        documents.extend(repo.list_documents(status=status))
+    return documents
+
 
 def _document_file_response(path_value: str, filename: str | None) -> FileResponse:
     """Serve a document file inline."""
@@ -332,7 +342,7 @@ def final_document(document_id: int, repo: Repository = Depends(get_repo)) -> Fi
 @router.get("/api/export-preview")
 def api_export_preview(repo: Repository = Depends(get_repo)):
     """Return documents ready for export, grouped by YYYY/MM."""
-    docs = repo.list_documents(status="doc_included")
+    docs = list_export_ready_documents(repo)
     tree: dict[str, list] = {}
     for doc in docs:
         date_str = doc.get("detected_date") or ""
@@ -349,13 +359,13 @@ def api_export(
     repo: Repository = Depends(get_repo),
     settings: Settings = Depends(get_settings),
 ):
-    """Move all included documents to output_dir/YYYY/MM/filename."""
+    """Move all export-ready documents to output_dir/YYYY/MM/filename."""
     output_base = settings.output_dir
     custom_output = repo.get_app_state("output_dir")
     if custom_output:
         output_base = Path(custom_output)
 
-    docs = repo.list_documents(status="doc_included")
+    docs = list_export_ready_documents(repo)
     moved = 0
     errors = []
     for doc in docs:

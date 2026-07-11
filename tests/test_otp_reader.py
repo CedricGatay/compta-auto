@@ -1,5 +1,6 @@
 """Tests for the OTP mail reader module."""
 
+from datetime import datetime, timezone
 from unittest.mock import patch, MagicMock
 import subprocess
 
@@ -87,7 +88,10 @@ class TestOtpMailReader:
         # Mock spark emails output
         emails_output = "  42001  noreply@free.fr  Code de vérification  2026-06-08"
         # Mock spark thread output
-        thread_output = "Message 42001\nFrom: noreply@free.fr\nSubject: Code de vérification\n\nBody:\nVotre code est 839201."
+        thread_output = (
+            "Message 42001\nFrom: noreply@free.fr\nSubject: Code de vérification\n\n"
+            "Body:\nVotre code est 839201."
+        )
 
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout=emails_output, stderr=""),
@@ -134,8 +138,14 @@ class TestOtpMailReader:
     @patch("compta_auto.otp_reader.subprocess.run")
     def test_filter_by_sender(self, mock_run):
         # Email from wrong sender should be filtered out
-        emails_output = "  200  amazon@notifications.com  Your order  2026-06-08\n  201  noreply@free.fr  Code connexion  2026-06-08"
-        thread_output = "Message 201\nFrom: noreply@free.fr\n\nBody:\nVotre code de confirmation: 456789"
+        emails_output = (
+            "  200  amazon@notifications.com  Your order  2026-06-08\n"
+            "  201  noreply@free.fr  Code connexion  2026-06-08"
+        )
+        thread_output = (
+            "Message 201\nFrom: noreply@free.fr\n\nBody:\n"
+            "Votre code de confirmation: 456789"
+        )
 
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout=emails_output, stderr=""),
@@ -150,3 +160,61 @@ class TestOtpMailReader:
         assert code == "456789"
         # Should only have called thread for ID 201, not 200
         assert mock_run.call_count == 2
+
+    def test_filter_prefers_candidates_after_started_at(self):
+        emails_output = "\n".join(
+            [
+                "  200  noreply@free.fr  Code connexion  2026-06-08 10:00",
+                "  201  noreply@free.fr  Code connexion  2026-06-08 10:05",
+            ]
+        )
+        reader = OtpMailReader(timeout=10, poll_interval=1)
+
+        local_tz = datetime.now().astimezone().tzinfo
+        candidates = reader._filter_candidates(
+            emails_output,
+            sender_keywords=["free.fr"],
+            subject_keywords=["code"],
+            started_at=datetime(2026, 6, 8, 10, 3, tzinfo=local_tz),
+        )
+
+        assert candidates == ["201"]
+
+    def test_filter_falls_back_to_unknown_timestamp_candidates(self):
+        emails_output = "  201  noreply@free.fr  Code connexion  2026-06-08"
+        reader = OtpMailReader(timeout=10, poll_interval=1)
+
+        candidates = reader._filter_candidates(
+            emails_output,
+            sender_keywords=["free.fr"],
+            subject_keywords=["code"],
+            started_at=datetime(2026, 6, 8, 10, 3, tzinfo=timezone.utc),
+        )
+
+        assert candidates == ["201"]
+
+
+def test_free_mobile_reader_wrapper_uses_longer_timeout_and_delay():
+    started_at = datetime(2026, 6, 8, 10, 3, tzinfo=timezone.utc)
+    with patch("compta_auto.otp_reader.OtpMailReader") as reader_cls:
+        reader = reader_cls.return_value
+        reader.wait_for_otp.return_value = "123456"
+
+        assert read_free_mobile_otp(started_at=started_at) == "123456"
+
+    reader_cls.assert_called_once_with(timeout=180, initial_delay=3)
+    _, kwargs = reader.wait_for_otp.call_args
+    assert kwargs["started_at"] == started_at
+
+
+def test_engie_reader_wrapper_uses_longer_timeout_and_delay():
+    started_at = datetime(2026, 6, 8, 10, 3, tzinfo=timezone.utc)
+    with patch("compta_auto.otp_reader.OtpMailReader") as reader_cls:
+        reader = reader_cls.return_value
+        reader.wait_for_otp.return_value = "654321"
+
+        assert read_engie_otp(started_at=started_at) == "654321"
+
+    reader_cls.assert_called_once_with(timeout=180, initial_delay=3)
+    _, kwargs = reader.wait_for_otp.call_args
+    assert kwargs["started_at"] == started_at

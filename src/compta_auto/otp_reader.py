@@ -6,7 +6,7 @@ import logging
 import re
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import datetime, time as datetime_time, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +26,11 @@ class OtpMailReader:
         self,
         timeout: int = 90,
         poll_interval: int = 5,
+        initial_delay: int = 0,
     ):
         self.timeout = timeout
         self.poll_interval = poll_interval
+        self.initial_delay = initial_delay
 
     def wait_for_otp(
         self,
@@ -54,9 +56,13 @@ class OtpMailReader:
         """
         if started_at is None:
             started_at = datetime.now(timezone.utc)
+        elif started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=timezone.utc)
 
         deadline = time.time() + self.timeout
         attempt = 0
+        if self.initial_delay > 0:
+            time.sleep(min(self.initial_delay, self.timeout))
 
         while time.time() < deadline:
             attempt += 1
@@ -105,7 +111,7 @@ class OtpMailReader:
 
         # Parse email IDs and find candidates
         candidate_ids = self._filter_candidates(
-            result.stdout, sender_keywords, subject_keywords
+            result.stdout, sender_keywords, subject_keywords, started_at
         )
 
         if not candidate_ids:
@@ -124,9 +130,11 @@ class OtpMailReader:
         emails_output: str,
         sender_keywords: list[str],
         subject_keywords: list[str],
+        started_at: datetime,
     ) -> list[str]:
         """Filter email list output to find OTP email candidates."""
-        candidates = []
+        fresh_candidates = []
+        unknown_time_candidates = []
         lines = emails_output.strip().splitlines()
 
         for line in lines:
@@ -150,9 +158,17 @@ class OtpMailReader:
             # Extract the ID from the line
             id_match = re.match(r"\s*(\d+)\s+", line)
             if id_match:
-                candidates.append(id_match.group(1))
+                email_id = id_match.group(1)
+                received_at = _parse_spark_line_datetime(line)
+                if received_at is None:
+                    unknown_time_candidates.append(email_id)
+                elif received_at >= started_at:
+                    fresh_candidates.append(email_id)
 
-        return candidates
+        if fresh_candidates:
+            return fresh_candidates
+
+        return unknown_time_candidates
 
     def _extract_otp_from_thread(self, email_id: str, code_length: int) -> str | None:
         """Read an email thread and extract OTP code from the body."""
@@ -212,19 +228,40 @@ def extract_otp_code(text: str, code_length: int = 6) -> str | None:
     return None
 
 
-def read_free_mobile_otp(timeout: int = 90) -> str:
+def _parse_spark_line_datetime(line: str) -> datetime | None:
+    """Best-effort parse of a timestamp from a Spark email list row."""
+    match = re.search(r"\b(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}(?::\d{2})?))?\b", line)
+    if not match:
+        return None
+
+    date_part, time_part = match.groups()
+    if not time_part:
+        return None
+
+    try:
+        parsed_date = datetime.fromisoformat(date_part).date()
+        parsed_time = datetime_time.fromisoformat(time_part)
+    except ValueError:
+        return None
+    local_tz = datetime.now().astimezone().tzinfo
+    return datetime.combine(parsed_date, parsed_time, tzinfo=local_tz)
+
+
+def read_free_mobile_otp(timeout: int = 180, started_at: datetime | None = None) -> str:
     """Read OTP code from Free Mobile verification email."""
-    reader = OtpMailReader(timeout=timeout)
+    reader = OtpMailReader(timeout=timeout, initial_delay=3)
     return reader.wait_for_otp(
         sender_keywords=FREE_MOBILE_OTP_SENDERS,
         subject_keywords=["code", "vérification", "verification", "connexion"],
+        started_at=started_at,
     )
 
 
-def read_engie_otp(timeout: int = 90) -> str:
+def read_engie_otp(timeout: int = 180, started_at: datetime | None = None) -> str:
     """Read OTP code from Engie/Okta verification email."""
-    reader = OtpMailReader(timeout=timeout)
+    reader = OtpMailReader(timeout=timeout, initial_delay=3)
     return reader.wait_for_otp(
         sender_keywords=ENGIE_OTP_SENDERS,
         subject_keywords=["code", "vérification", "verification", "sécurité"],
+        started_at=started_at,
     )

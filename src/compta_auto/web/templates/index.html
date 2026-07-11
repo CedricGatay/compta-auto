@@ -4,13 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Compta Auto</title>
-    <link rel="stylesheet" href="/static/styles.css?v=10">
-    <script src="/static/app.js?v=21" defer></script>
+    <link rel="stylesheet" href="/static/styles.css?v=11">
+    <script src="/static/app.js?v=22" defer></script>
   </head>
   <body>
     {% set triage_count = (mails|selectattr("status", "equalto", "mail_triage_needed")|list|length) + (mails|selectattr("status", "equalto", "mail_missing_provider")|list|length) %}
     {% set review_count = documents|selectattr("status", "equalto", "rename_review_needed")|list|length + documents|selectattr("status", "equalto", "renamed")|list|length %}
-    {% set export_count = documents|selectattr("status", "equalto", "doc_included")|list|length %}
+    {% set export_count = documents|selectattr("status", "equalto", "doc_included")|list|length + documents|selectattr("status", "equalto", "uploaded_to_inqom")|list|length %}
     {% set provider_link_count = provider_tasks|length %}
     {% macro accounting_type_badge(accounting_type) -%}
     <span class="badge accounting-type-badge accounting-type-{{ accounting_type or 'unknown' }}">
@@ -1027,21 +1027,29 @@
       </div>
       <div class="panel-home" data-panel-home="export">
       <div class="tab-panel" id="panel-export" role="tabpanel">
-        {% set export_docs = documents|selectattr("status", "equalto", "doc_included")|list %}
+        {% set export_included_docs = documents|selectattr("status", "equalto", "doc_included")|list %}
+        {% set export_uploaded_docs = documents|selectattr("status", "equalto", "uploaded_to_inqom")|list %}
+        {% set export_docs = export_included_docs + export_uploaded_docs %}
 
-        <div class="panel-header">
-          <h2 class="section-title">📦 Export preview <span class="count-label">{{ export_docs|length }}</span></h2>
-          <div class="panel-header-actions">
-            <span class="export-output-label">Output: <code id="export-output-path">loading…</code></span>
-            <button type="button" class="btn btn-outline btn-sm" id="export-change-dir-btn">📂 Change</button>
-          <button type="button" class="btn btn-outline btn-sm" id="inqom-upload-btn" {% if not export_docs %}disabled{% endif %}>
-            ☁️ Upload to Inqom
-            </button>
-          <button type="button" class="btn btn-primary" id="export-all-btn" data-default-label="🚀 Rename &amp; move all ({{ export_docs|length }})" {% if not export_docs %}disabled{% endif %}>
-            🚀 Rename &amp; move all ({{ export_docs|length }})
-          </button>
+        <div class="export-status-panel">
+          <div class="panel-header">
+            <h2 class="section-title">📤 Export</h2>
+            <div class="panel-header-actions">
+              <span class="export-output-label">Output: <code id="export-output-path">loading…</code></span>
+              <button type="button" class="btn btn-outline btn-sm" id="export-change-dir-btn">📂 Change</button>
+              <button type="button" class="btn btn-outline btn-sm" id="inqom-upload-btn" {% if not export_included_docs %}disabled{% endif %}>
+                ☁️ Upload to Inqom
+              </button>
+              <button type="button" class="btn btn-primary" id="export-all-btn" data-default-label="🚀 Rename &amp; move all ({{ export_docs|length }})" {% if not export_docs %}disabled{% endif %}>
+                🚀 Rename &amp; move all ({{ export_docs|length }})
+              </button>
+            </div>
+          </div>
+          <div id="export-result" class="fetch-result" hidden></div>
+          <div id="inqom-upload-result" class="fetch-result" hidden></div>
         </div>
-        </div>
+
+        <h2 class="section-title">📦 Export preview <span class="count-label">{{ export_docs|length }}</span></h2>
 
         {% if export_docs %}
         <div class="export-tree" id="export-tree">
@@ -1096,8 +1104,6 @@
         </div>
         {% endif %}
 
-        <div id="export-result" class="fetch-result" hidden></div>
-        <div id="inqom-upload-result" class="fetch-result" hidden></div>
       </div>
       </div>
 

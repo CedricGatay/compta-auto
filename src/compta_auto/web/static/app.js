@@ -601,13 +601,23 @@ function readProviderSSE(resp, resultDiv, { credFields, badgeId, editBtnId, onCo
       buffer = lines.pop();
       for (const line of lines) {
         if (!line.startsWith("data: ")) continue;
-        const event = JSON.parse(line.slice(6));
+        let event;
+        try {
+          event = JSON.parse(line.slice(6));
+        } catch (err) {
+          resultDiv.className = "fetch-result fetch-result-error";
+          resultDiv.textContent = `Invalid server event: ${err.message}`;
+          return;
+        }
         if (event.type === "progress") {
           const pct = event.total > 0 ? Math.round((event.current / event.total) * 100) : 0;
           resultDiv.innerHTML = `<div class="fetch-progress-bar"><div class="fetch-progress-fill" style="width:${pct}%"></div></div><span>${event.message}</span>`;
         } else if (event.type === "status") {
           resultDiv.innerHTML = `<span>⏳ ${event.message}</span>`;
-        } else if (event.type === "complete") {
+        } else if (event.type === "uploaded") {
+          const pct = event.total > 0 ? Math.round((event.current / event.total) * 100) : 0;
+          resultDiv.innerHTML = `<div class="fetch-progress-bar"><div class="fetch-progress-fill" style="width:${pct}%"></div></div><span>Uploaded ${event.file || "document"} (${event.current}/${event.total})</span>`;
+        } else if (event.type === "complete" || event.type === "done") {
           const r = event.result || event;
           resultDiv.className = "fetch-result fetch-result-success";
           if (onComplete) {
@@ -623,6 +633,7 @@ function readProviderSSE(resp, resultDiv, { credFields, badgeId, editBtnId, onCo
           resultDiv.className = "fetch-result fetch-result-error";
           resultDiv.textContent = event.error;
           if (credFields) revealCredFields(credFields, badgeId, editBtnId);
+          return;
         }
       }
     }
@@ -1056,11 +1067,15 @@ loadExportOutputPath();
 
 function formatInqomComplete(result, resultDiv) {
   const parts = [];
+  const errors = Array.isArray(result.errors) ? result.errors : [];
+  if (result.total > 0 && result.uploaded === result.total && errors.length === 0) {
+    parts.push("✅ All documents uploaded to Inqom");
+  }
   if (result.message) parts.push(result.message);
-  if (typeof result.uploaded === "number") parts.push(`✅ Uploaded ${result.uploaded} document(s)`);
+  if (typeof result.uploaded === "number" && !parts.length) parts.push(`✅ Uploaded ${result.uploaded} document(s)`);
   if (typeof result.skipped === "number" && result.skipped > 0) parts.push(`⏭ ${result.skipped} skipped`);
   if (typeof result.failed === "number" && result.failed > 0) parts.push(`⚠️ ${result.failed} failed`);
-  if (Array.isArray(result.errors) && result.errors.length > 0) parts.push(`⚠️ ${result.errors.length} error(s)`);
+  if (errors.length > 0) parts.push(`⚠️ ${errors.length} error(s)`);
   if (!parts.length) parts.push("Upload complete.");
   resultDiv.innerHTML = parts.join("<br>");
 }
