@@ -22,6 +22,72 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["providers"])
 
 
+def _parse_otp_requested_at(value: str) -> datetime:
+    """Validate the timestamp that scopes a manual Spark OTP refresh."""
+    try:
+        requested_at = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid OTP request timestamp.") from exc
+    if requested_at.tzinfo is None:
+        raise HTTPException(status_code=400, detail="OTP request timestamp must include a timezone.")
+    return requested_at.astimezone(timezone.utc)
+
+
+def _parse_known_otp_message_ids(value: str) -> set[str]:
+    """Parse the pre-login Spark snapshot sent back by the browser."""
+    try:
+        ids = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid OTP message snapshot.") from exc
+    if not isinstance(ids, list) or not all(isinstance(message_id, str) for message_id in ids):
+        raise HTTPException(status_code=400, detail="Invalid OTP message snapshot.")
+    return set(ids)
+
+
+@router.post("/free-mobile-refresh-otp")
+def api_free_mobile_refresh_otp(
+    requested_at: str = Form(...), known_message_ids: str = Form("[]")
+):
+    """Force a fresh Spark lookup for a Free Mobile OTP, including read mail."""
+    from ..otp_reader import OtpReadError, latest_mail_summary, read_free_mobile_otp
+
+    logger.info("Free Mobile OTP Spark refresh requested")
+    last_email = latest_mail_summary()
+    try:
+        code = read_free_mobile_otp(
+            timeout=10,
+            started_at=_parse_otp_requested_at(requested_at),
+            include_read=True,
+            excluded_message_ids=_parse_known_otp_message_ids(known_message_ids),
+        )
+    except OtpReadError:
+        code = None
+    logger.info("Free Mobile OTP Spark refresh completed: code_found=%s", bool(code))
+    return {"otp_code": code, "last_email": last_email}
+
+
+@router.post("/engie-refresh-otp")
+def api_engie_refresh_otp(
+    requested_at: str = Form(...), known_message_ids: str = Form("[]")
+):
+    """Force a fresh Spark lookup for an Engie Pro OTP, including read mail."""
+    from ..otp_reader import OtpReadError, latest_mail_summary, read_engie_otp
+
+    logger.info("Engie Pro OTP Spark refresh requested")
+    last_email = latest_mail_summary()
+    try:
+        code = read_engie_otp(
+            timeout=10,
+            started_at=_parse_otp_requested_at(requested_at),
+            include_read=True,
+            excluded_message_ids=_parse_known_otp_message_ids(known_message_ids),
+        )
+    except OtpReadError:
+        code = None
+    logger.info("Engie Pro OTP Spark refresh completed: code_found=%s", bool(code))
+    return {"otp_code": code, "last_email": last_email}
+
+
 @router.post("/fetch-spotify")
 def api_fetch_spotify(
     sp_dc: str = Form(""),
@@ -78,6 +144,7 @@ def api_free_mobile_login(
 ):
     """Step 1: Login to Free Mobile (triggers OTP via email)."""
     from ..free_invoices import login
+    from ..otp_reader import recent_mail_ids
 
     effective_user = get_credential(repo, "free_username", username, fernet=fernet)
     effective_pass = get_credential(repo, "free_password", password, fernet=fernet)
@@ -85,6 +152,7 @@ def api_free_mobile_login(
         return JSONResponse(status_code=400, content={"error": "No credentials provided or saved."})
 
     try:
+        known_message_ids = recent_mail_ids()
         session_cookies, csrf_token, otp_id = login(effective_user, effective_pass)
         save_credential(repo, "free_username", effective_user, fernet=fernet)
         save_credential(repo, "free_password", effective_pass, fernet=fernet)
@@ -93,6 +161,7 @@ def api_free_mobile_login(
             "session_cookies": session_cookies,
             "csrf_token": csrf_token,
             "otp_id": otp_id,
+            "known_message_ids": sorted(known_message_ids),
         }
     except AuthError as exc:
         return JSONResponse(status_code=401, content={"error": str(exc)})
@@ -244,6 +313,7 @@ def api_engie_login(
 ):
     """Step 1: Login to Engie Pro (triggers MFA code via email)."""
     from ..engie_invoices import login
+    from ..otp_reader import recent_mail_ids
 
     effective_email = get_credential(repo, "engie_email", email, fernet=fernet)
     effective_pass = get_credential(repo, "engie_password", password, fernet=fernet)
@@ -251,6 +321,7 @@ def api_engie_login(
         return JSONResponse(status_code=400, content={"error": "No credentials provided or saved."})
 
     try:
+        known_message_ids = recent_mail_ids()
         session_cookies, factor_id, user_id, form_build_id = login(effective_email, effective_pass)
         save_credential(repo, "engie_email", effective_email, fernet=fernet)
         save_credential(repo, "engie_password", effective_pass, fernet=fernet)
@@ -262,6 +333,7 @@ def api_engie_login(
             "factor_id": factor_id,
             "user_id": user_id,
             "form_build_id": form_build_id,
+            "known_message_ids": sorted(known_message_ids),
         }
     except AuthError as exc:
         return JSONResponse(status_code=401, content={"error": str(exc)})
@@ -320,7 +392,7 @@ def api_free_mobile_auto(
             yield f"data: {json.dumps({'type': 'status', 'message': 'Waiting for OTP email in mailbox…'})}\n\n"
             otp_code = read_free_mobile_otp(timeout=180, started_at=otp_requested_at)
 
-            yield f"data: {json.dumps({'type': 'status', 'message': f'OTP code retrieved, validating…'})}\n\n"
+            yield f"data: {json.dumps({'type': 'status', 'message': 'OTP code retrieved, validating…'})}\n\n"
             stream = fetch_free_invoices_stream(
                 session_cookies, csrf_token, otp_code, otp_id, settings.raw_dir,
             )
@@ -382,7 +454,7 @@ def api_engie_auto(
             yield f"data: {json.dumps({'type': 'status', 'message': 'Waiting for OTP email in mailbox…'})}\n\n"
             otp_code = read_engie_otp(timeout=180, started_at=otp_requested_at)
 
-            yield f"data: {json.dumps({'type': 'status', 'message': f'OTP code retrieved, validating…'})}\n\n"
+            yield f"data: {json.dumps({'type': 'status', 'message': 'OTP code retrieved, validating…'})}\n\n"
             stream = fetch_engie_invoices_stream(
                 session_cookies, factor_id, user_id, form_build_id, otp_code, settings.raw_dir,
             )
@@ -409,16 +481,22 @@ def api_henrri_fetch(
     """Fetch all finalized Henrri invoices."""
     from ..henrri_invoices import fetch_henrri_invoices_stream
 
-    effective_id = get_credential(repo, "henrri_client_id", client_id, fernet=fernet)
-    effective_secret = get_credential(repo, "henrri_client_secret", client_secret, fernet=fernet)
+    effective_id = settings.henrri_client_id or get_credential(
+        repo, "henrri_client_id", client_id, fernet=fernet
+    )
+    effective_secret = settings.henrri_client_secret or get_credential(
+        repo, "henrri_client_secret", client_secret, fernet=fernet
+    )
     if not effective_id or not effective_secret:
         return JSONResponse(
             status_code=400,
             content={"error": "Henrri API credentials required (client ID and client secret)."},
         )
 
-    save_credential(repo, "henrri_client_id", effective_id, fernet=fernet)
-    save_credential(repo, "henrri_client_secret", effective_secret, fernet=fernet)
+    if not settings.henrri_client_id:
+        save_credential(repo, "henrri_client_id", effective_id, fernet=fernet)
+    if not settings.henrri_client_secret:
+        save_credential(repo, "henrri_client_secret", effective_secret, fernet=fernet)
 
     stream = fetch_henrri_invoices_stream(
         effective_id, effective_secret, settings.raw_dir,

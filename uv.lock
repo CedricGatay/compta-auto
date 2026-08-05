@@ -202,6 +202,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "fpdf2" },
     { name = "jinja2" },
+    { name = "markdown" },
     { name = "playwright" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -212,6 +213,7 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "httpx" },
     { name = "pytest" },
 ]
 docs = [
@@ -228,7 +230,9 @@ requires-dist = [
     { name = "cryptography", specifier = ">=43.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "fpdf2", specifier = ">=2.8.0" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28" },
     { name = "jinja2", specifier = ">=3.1.4" },
+    { name = "markdown", specifier = ">=3.7" },
     { name = "openai", marker = "extra == 'llm'", specifier = ">=1.30.0" },
     { name = "pdfplumber", marker = "extra == 'docs'", specifier = ">=0.11.4" },
     { name = "pillow", marker = "extra == 'docs'", specifier = ">=10.4.0" },
@@ -589,6 +593,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/e7/95/a06692b29e77473f286e1ec1f426d3ca44d7b5843be8ad21d7a5f3fcdcc0/jiter-0.15.0-graalpy312-graalpy250_312_native-macosx_11_0_arm64.whl", hash = "sha256:b6c0ffae686c39bf3737be60793783267628783ea42545632c10b291105aee45", size = 305128, upload-time = "2026-05-19T10:09:43.657Z" },
     { url = "https://files.pythonhosted.org/packages/23/85/7270d7ad41d6061a25b950c6bf91d638bd9aacb113200a8c8d57a055fd67/jiter-0.15.0-graalpy312-graalpy250_312_native-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:1d54fb5b31dea401a41af3f8a7d2512e9b6a6a005491e6166c7e4ffab9639a9c", size = 340459, upload-time = "2026-05-19T10:09:45.452Z" },
     { url = "https://files.pythonhosted.org/packages/c8/8d/302cb2057b7513327b4d575cff6b1d066ee6431a5357fc3f8867cd684406/jiter-0.15.0-graalpy312-graalpy250_312_native-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:54d5d6090cdc1b7c9e780dfb04949a990adb1e301a2fc0bbcee7de4638d33f9a", size = 344469, upload-time = "2026-05-19T10:09:46.864Z" },
+]
+
+[[package]]
+name = "markdown"
+version = "3.10.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/29/6f/da4c6aea59b3001f2e8c0ec7497475aadaf3b021c10cab5b2858f0f32b26/markdown-3.10.3.tar.gz", hash = "sha256:3589362618f743188b4d955b874402bc814f4f83f544dc207719f4baa7d9c45f", size = 372596, upload-time = "2026-07-30T19:05:29.005Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/64/69/4a5af2bc115a9a33fefe51709749de8262be3f9ba063d1753a837cdbc49c/markdown-3.10.3-py3-none-any.whl", hash = "sha256:fa6c92a00a4a3c98b22728c64a935ae1928250ae65058a6ded814d2cc29a4cea", size = 110757, upload-time = "2026-07-30T19:05:27.883Z" },
 ]
 
 [[package]]

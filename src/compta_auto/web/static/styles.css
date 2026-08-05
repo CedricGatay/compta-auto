@@ -1603,6 +1603,24 @@ button.preview { color: inherit; cursor: pointer; padding: 0; }
   border-radius: 2px;
   transition: width 0.3s ease;
 }
+.otp-polling-status {
+  color: var(--color-text-secondary);
+  font-size: 0.82rem;
+  margin: 8px 0 0;
+}
+.otp-attempt-count {
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  margin: 4px 0 0;
+}
+.otp-spinner {
+  display: inline-block;
+  animation: otp-spin 1s linear infinite;
+}
+@keyframes otp-spin {
+  to { transform: rotate(360deg); }
+}
 /* Scan result (inline progress near scan buttons) */
 .scan-result {
   padding: 6px 10px;

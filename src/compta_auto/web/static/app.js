@@ -666,6 +666,10 @@ function bindProviderFetch({ formId, btnId, resultId, providerName, endpoint, bt
     let allFilled = true;
     for (const id of credInputIds) {
       const el = document.getElementById(id);
+      if (!el) {
+        creds[id] = "";
+        continue;
+      }
       if (!el.hidden) {
         hasVisible = true;
         if (!el.value.trim()) allFilled = false;
@@ -766,10 +770,96 @@ bindProviderFetch({
   providerName: "Henrri", endpoint: "/api/henrri-fetch", btnLabel: "📥 Fetch Invoices",
   connectingMsg: "Connecting to Henrri API…",
   credInputIds: ["henrri-client-id", "henrri-client-secret"], badgeId: "henrri-saved-badge", editBtnId: "henrri-edit-btn",
-  buildFormData: (creds) => { const fd = new FormData(); fd.append("client_id", creds["henrri-client-id"]); fd.append("client_secret", creds["henrri-client-secret"]); return fd; },
+  buildFormData: (creds) => { const fd = new FormData(); fd.append("client_id", creds["henrri-client-id"] || ""); fd.append("client_secret", creds["henrri-client-secret"] || ""); return fd; },
 });
 
+// Read an OTP from Spark without making manual entry wait for the mailbox.
+function startOtpAutoRead({ endpoint, requestedAt, knownMessageIds, otpInput, refreshBtn, stopBtn, statusEl, attemptsEl, resultDiv, onCode }) {
+  let stopped = false;
+  let checking = false;
+  let timerId = null;
+  let checkCount = 0;
+
+  // Keep the polling details with the OTP message rather than below the form.
+  resultDiv.append(statusEl, attemptsEl);
+
+  function setStatus(message) {
+    statusEl.hidden = false;
+    const spinner = document.createElement("span");
+    spinner.className = "otp-spinner";
+    spinner.textContent = "◌";
+    statusEl.replaceChildren(spinner, document.createTextNode(` ${message}`));
+  }
+
+  function setAttemptCount() {
+    attemptsEl.hidden = false;
+    attemptsEl.textContent = `Spark fetch attempts: ${checkCount}`;
+  }
+
+  async function checkMailbox(forced = false) {
+    if (stopped || checking) return;
+    checking = true;
+    checkCount += 1;
+    setAttemptCount();
+    refreshBtn.disabled = true;
+    if (forced) refreshBtn.textContent = "Checking Spark…";
+    setStatus(`Checking Spark for an OTP (check ${checkCount})…`);
+    try {
+      const formData = new FormData();
+      formData.append("requested_at", requestedAt);
+      formData.append("known_message_ids", JSON.stringify(knownMessageIds));
+      const resp = await fetch(endpoint, { method: "POST", body: formData });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.otp_code) {
+          otpInput.value = data.otp_code;
+          resultDiv.className = "fetch-result fetch-result-progress";
+          resultDiv.textContent = "✅ Code found in Spark. Validating…";
+          onCode();
+          return;
+        }
+        const newestMail = data.last_email || "no mail received in the last day";
+        setStatus(`Polling Spark continuously · latest email: ${newestMail}`);
+      } else if (resp.status !== 404 && forced) {
+        resultDiv.className = "fetch-result fetch-result-error";
+        resultDiv.textContent = "Could not refresh Spark. You can still enter the code manually.";
+      }
+    } catch (err) {
+      if (forced) {
+        resultDiv.className = "fetch-result fetch-result-error";
+        resultDiv.textContent = `Spark refresh failed: ${err.message}. You can still enter the code manually.`;
+      }
+    } finally {
+      checking = false;
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = "↻ Force-fetch email";
+    }
+  }
+
+  refreshBtn.hidden = false;
+  stopBtn.hidden = false;
+  refreshBtn.onclick = () => checkMailbox(true);
+  stopBtn.onclick = () => stop();
+  setStatus("Polling Spark continuously…");
+  setAttemptCount();
+  timerId = window.setInterval(() => checkMailbox(), 5000);
+  window.setTimeout(() => checkMailbox(), 1000);
+  function stop() {
+    stopped = true;
+    if (timerId !== null) window.clearInterval(timerId);
+    refreshBtn.hidden = true;
+    refreshBtn.onclick = null;
+    stopBtn.hidden = true;
+    stopBtn.onclick = null;
+    statusEl.hidden = false;
+    statusEl.textContent = "Spark OTP polling stopped. You can still enter the code manually.";
+  }
+  return stop;
+}
+
 // === Free Mobile fetch (2-step: login + OTP) ===
+let freeAutoMode = false;
+let freeOtpPolling = null;
 const freeLoginForm = document.getElementById("fetch-free-login-form");
 if (freeLoginForm) {
   let freeSession = {};
@@ -784,6 +874,8 @@ if (freeLoginForm) {
     const passwordInput = document.getElementById("free-password");
     const username = usernameInput.hidden ? "" : usernameInput.value.trim();
     const password = passwordInput.hidden ? "" : passwordInput.value;
+    const autoMode = freeAutoMode;
+    freeAutoMode = false;
 
     if (!usernameInput.hidden && (!username || !password)) return;
     btn.disabled = true;
@@ -793,6 +885,7 @@ if (freeLoginForm) {
     resultDiv.textContent = "Logging in… A verification code will be sent to your email.";
 
     try {
+      const otpRequestedAt = new Date().toISOString();
       const formData = new FormData();
       formData.append("username", username);
       formData.append("password", password);
@@ -808,12 +901,27 @@ if (freeLoginForm) {
       }
 
       if (data.status === "otp_required") {
-        freeSession = { session_cookies: data.session_cookies, csrf_token: data.csrf_token, otp_id: data.otp_id || "" };
+        freeSession = { session_cookies: data.session_cookies, csrf_token: data.csrf_token, otp_id: data.otp_id || "", known_message_ids: data.known_message_ids || [] };
         resultDiv.className = "fetch-result fetch-result-progress";
         resultDiv.textContent = "✅ Code sent to your email! Enter it below.";
         otpForm.hidden = false;
         document.getElementById("fetch-free-otp-btn").disabled = false;
         document.getElementById("free-otp").focus();
+        if (autoMode) {
+          freeOtpPolling?.();
+          freeOtpPolling = startOtpAutoRead({
+            endpoint: "/api/free-mobile-refresh-otp",
+            requestedAt: otpRequestedAt,
+            knownMessageIds: freeSession.known_message_ids,
+            otpInput: document.getElementById("free-otp"),
+            refreshBtn: document.getElementById("fetch-free-refresh-otp-btn"),
+            stopBtn: document.getElementById("fetch-free-stop-otp-btn"),
+            statusEl: document.getElementById("free-otp-polling-status"),
+            attemptsEl: document.getElementById("free-otp-attempt-count"),
+            resultDiv,
+            onCode: () => otpForm.requestSubmit(),
+          });
+        }
       }
     } catch (err) {
       resultDiv.className = "fetch-result fetch-result-error";
@@ -828,6 +936,8 @@ if (freeLoginForm) {
   const otpForm = document.getElementById("fetch-free-otp-form");
   otpForm.addEventListener("submit", async (e) => {
     e.preventDefault();
+    freeOtpPolling?.();
+    freeOtpPolling = null;
     const btn = document.getElementById("fetch-free-otp-btn");
     const resultDiv = document.getElementById("fetch-free-result");
     const otpCode = document.getElementById("free-otp").value.trim();
@@ -867,6 +977,8 @@ if (freeLoginForm) {
 }
 
 // === Engie Pro fetch (2-step: login + OTP) ===
+let engieOtpPolling = null;
+let engieAutoMode = false;
 const engieLoginForm = document.getElementById("fetch-engie-login-form");
 if (engieLoginForm) {
   engieLoginForm.addEventListener("submit", async (e) => {
@@ -878,6 +990,8 @@ if (engieLoginForm) {
     const passwordInput = document.getElementById("engie-password");
     const email = emailInput.hidden ? "" : emailInput.value.trim();
     const password = passwordInput.hidden ? "" : passwordInput.value;
+    const autoMode = engieAutoMode;
+    engieAutoMode = false;
 
     if (!emailInput.hidden && (!email || !password)) return;
     btn.disabled = true;
@@ -887,6 +1001,7 @@ if (engieLoginForm) {
     resultDiv.textContent = "Authenticating…";
 
     try {
+      const otpRequestedAt = new Date().toISOString();
       const formData = new FormData();
       formData.append("email", email);
       formData.append("password", password);
@@ -911,6 +1026,21 @@ if (engieLoginForm) {
         resultDiv.className = "fetch-result fetch-result-progress";
         resultDiv.textContent = "Security code sent to your email. Enter it below.";
         document.getElementById("engie-otp-code").focus();
+        if (autoMode) {
+          engieOtpPolling?.();
+          engieOtpPolling = startOtpAutoRead({
+            endpoint: "/api/engie-refresh-otp",
+            requestedAt: otpRequestedAt,
+            knownMessageIds: data.known_message_ids || [],
+            otpInput: document.getElementById("engie-otp-code"),
+            refreshBtn: document.getElementById("fetch-engie-refresh-otp-btn"),
+            stopBtn: document.getElementById("fetch-engie-stop-otp-btn"),
+            statusEl: document.getElementById("engie-otp-polling-status"),
+            attemptsEl: document.getElementById("engie-otp-attempt-count"),
+            resultDiv,
+            onCode: () => document.getElementById("fetch-engie-otp-form").requestSubmit(),
+          });
+        }
       } else {
         resultDiv.className = "fetch-result fetch-result-success";
         resultDiv.textContent = "Logged in without MFA (device trusted).";
@@ -930,6 +1060,8 @@ const engieOtpForm = document.getElementById("fetch-engie-otp-form");
 if (engieOtpForm) {
   engieOtpForm.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (typeof engieOtpPolling === "function") engieOtpPolling();
+    engieOtpPolling = null;
     const btn = document.getElementById("fetch-engie-otp-btn");
     const resultDiv = document.getElementById("fetch-engie-result");
     const otpCode = document.getElementById("engie-otp-code").value.trim();
@@ -972,84 +1104,24 @@ if (engieOtpForm) {
 // === Free Mobile auto-fetch (single-step via mailbox OTP) ===
 const freeAutoBtn = document.getElementById("fetch-free-auto-btn");
 if (freeAutoBtn) {
-  freeAutoBtn.addEventListener("click", async () => {
-    if (!acquireFetchLock("Free Mobile Auto")) return;
-    const resultDiv = document.getElementById("fetch-free-result");
+  freeAutoBtn.addEventListener("click", () => {
     const usernameInput = document.getElementById("free-username");
     const passwordInput = document.getElementById("free-password");
-    const username = usernameInput.hidden ? "" : usernameInput.value.trim();
-    const password = passwordInput.hidden ? "" : passwordInput.value;
-
-    freeAutoBtn.disabled = true;
-    freeAutoBtn.textContent = "⏳ Auto-fetching…";
-    resultDiv.hidden = false;
-    resultDiv.className = "fetch-result fetch-result-progress";
-    resultDiv.textContent = "Logging in and waiting for OTP from mailbox…";
-
-    try {
-      const formData = new FormData();
-      formData.append("username", username);
-      formData.append("password", password);
-      const resp = await fetch("/api/free-mobile-auto", { method: "POST", body: formData });
-      if (!resp.ok) {
-        const data = await resp.json();
-        resultDiv.className = "fetch-result fetch-result-error";
-        resultDiv.textContent = data.error || `Server error: ${resp.status}`;
-        return;
-      }
-      await readProviderSSE(resp, resultDiv, {
-        onComplete: (r, div) => { formatCompactComplete(r, div); },
-      });
-    } catch (err) {
-      resultDiv.className = "fetch-result fetch-result-error";
-      resultDiv.textContent = `Network error: ${err.message}`;
-    } finally {
-      releaseFetchLock();
-      freeAutoBtn.disabled = false;
-      freeAutoBtn.textContent = "🤖 Auto-fetch";
-    }
+    if (!usernameInput.hidden && (!usernameInput.value.trim() || !passwordInput.value)) return;
+    freeAutoMode = true;
+    freeLoginForm.requestSubmit();
   });
 }
 
 // === Engie Pro auto-fetch (single-step via mailbox OTP) ===
 const engieAutoBtn = document.getElementById("fetch-engie-auto-btn");
 if (engieAutoBtn) {
-  engieAutoBtn.addEventListener("click", async () => {
-    if (!acquireFetchLock("Engie Pro Auto")) return;
-    const resultDiv = document.getElementById("fetch-engie-result");
+  engieAutoBtn.addEventListener("click", () => {
     const emailInput = document.getElementById("engie-email");
     const passwordInput = document.getElementById("engie-password");
-    const email = emailInput.hidden ? "" : emailInput.value.trim();
-    const password = passwordInput.hidden ? "" : passwordInput.value;
-
-    engieAutoBtn.disabled = true;
-    engieAutoBtn.textContent = "⏳ Auto-fetching…";
-    resultDiv.hidden = false;
-    resultDiv.className = "fetch-result fetch-result-progress";
-    resultDiv.textContent = "Logging in and waiting for OTP from mailbox…";
-
-    try {
-      const formData = new FormData();
-      formData.append("email", email);
-      formData.append("password", password);
-      const resp = await fetch("/api/engie-auto", { method: "POST", body: formData });
-      if (!resp.ok) {
-        const data = await resp.json();
-        resultDiv.className = "fetch-result fetch-result-error";
-        resultDiv.textContent = data.error || `Server error: ${resp.status}`;
-        return;
-      }
-      await readProviderSSE(resp, resultDiv, {
-        onComplete: (r, div) => { formatCompactComplete(r, div); document.getElementById("fetch-engie-otp-form").hidden = true; },
-      });
-    } catch (err) {
-      resultDiv.className = "fetch-result fetch-result-error";
-      resultDiv.textContent = `Network error: ${err.message}`;
-    } finally {
-      releaseFetchLock();
-      engieAutoBtn.disabled = false;
-      engieAutoBtn.textContent = "🤖 Auto-fetch";
-    }
+    if (!emailInput.hidden && (!emailInput.value.trim() || !passwordInput.value)) return;
+    engieAutoMode = true;
+    engieLoginForm.requestSubmit();
   });
 }
 

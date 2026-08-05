@@ -7,7 +7,6 @@ from within the authenticated browser context to call the bills API.
 
 from __future__ import annotations
 
-import json
 import uuid
 from pathlib import Path
 from typing import Generator
@@ -25,6 +24,47 @@ _API_HEADERS = {
     "X-App-Device-Type": "desktop",
     "Accept": "application/json",
 }
+
+_USERNAME_SELECTOR = (
+    "#login, input[name='login'], input[autocomplete='username'], "
+    "input[type='email'], input[type='text']"
+)
+
+
+def _dismiss_cookie_consent(page) -> None:
+    """Dismiss Orange's Didomi consent layer when it blocks the login form."""
+    for selector in (
+        "#didomi-notice-agree-button",
+        "#didomi-notice-disagree-button",
+        "#didomi-host button[data-testid='notice-agree-button']",
+    ):
+        button = page.locator(selector).first
+        if button.is_visible():
+            button.click(timeout=5_000)
+            return
+
+
+def _enter_username(page, username: str) -> None:
+    """Open Orange's manual-login form when its account chooser is shown."""
+    _dismiss_cookie_consent(page)
+    username_input = page.locator(_USERNAME_SELECTOR).first
+    other_account = page.get_by_role("button", name="Saisir un autre compte")
+    for _ in range(20):
+        if username_input.is_visible():
+            username_input.fill(username)
+            return
+        if other_account.is_visible():
+            _dismiss_cookie_consent(page)
+            other_account.click()
+            username_input.wait_for(state="visible", timeout=10_000)
+            username_input.fill(username)
+            return
+        page.wait_for_timeout(500)
+
+    # Preserve Playwright's useful locator diagnostics if Orange changes its
+    # login journey again.
+    username_input.wait_for(state="visible", timeout=10_000)
+    username_input.fill(username)
 
 
 def _fetch_json(page, url: str, headers: dict[str, str], context: str) -> dict:
@@ -107,8 +147,9 @@ def _launch_and_login(username: str, password: str):
             wait_until="networkidle",
         )
 
-        # Fill username
-        page.fill('input[type="text"]', username)
+        # Orange may first show previously used accounts. Select the manual
+        # form before looking for its login field.
+        _enter_username(page, username)
         page.click('button[type="submit"]')
         page.wait_for_timeout(2000)
 

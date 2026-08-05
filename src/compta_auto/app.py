@@ -88,6 +88,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "provider_hint_counts": repo.count_provider_hints(),
                 "missing_providers": repo.list_missing_providers(),
                 "henrri_is_sandbox": "sandbox" in app_settings.henrri_base_url,
+                "henrri_credentials_from_env": bool(
+                    app_settings.henrri_client_id or app_settings.henrri_client_secret
+                ),
+                "henrri_client_id_from_env": bool(app_settings.henrri_client_id),
+                "henrri_client_secret_from_env": bool(app_settings.henrri_client_secret),
             },
         )
 

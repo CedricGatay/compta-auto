@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Compta Auto</title>
     <link rel="stylesheet" href="/static/styles.css?v=11">
-    <script src="/static/app.js?v=22" defer></script>
+    <script src="/static/app.js?v=28" defer></script>
   </head>
   <body>
     {% set triage_count = (mails|selectattr("status", "equalto", "mail_triage_needed")|list|length) + (mails|selectattr("status", "equalto", "mail_missing_provider")|list|length) %}
@@ -900,7 +900,11 @@
             <div class="fetch-input-row">
               <input type="text" name="otp_code" id="free-otp" placeholder="Email code" required autocomplete="off" pattern="\d{4,8}" style="max-width:120px">
               <button type="submit" class="btn btn-primary" id="fetch-free-otp-btn">✅ Validate &amp; Fetch</button>
+              <button type="button" class="btn btn-outline" id="fetch-free-refresh-otp-btn" hidden>↻ Force-fetch email</button>
+              <button type="button" class="btn btn-outline" id="fetch-free-stop-otp-btn" hidden>■ Stop polling</button>
             </div>
+            <p class="otp-polling-status" id="free-otp-polling-status" role="status" hidden></p>
+            <p class="otp-attempt-count" id="free-otp-attempt-count" hidden>Spark fetch attempts: 0</p>
           </form>
           <div id="fetch-free-result" class="fetch-result" hidden></div>
         </section>
@@ -997,11 +1001,15 @@
             <div class="fetch-input-row">
               <input type="text" name="otp_code" id="engie-otp-code" placeholder="6-digit code" maxlength="6" pattern="[0-9]{6}" style="max-width:120px" autocomplete="one-time-code">
               <button type="submit" class="btn btn-primary" id="fetch-engie-otp-btn">📥 Validate &amp; Fetch</button>
+              <button type="button" class="btn btn-outline" id="fetch-engie-refresh-otp-btn" hidden>↻ Force-fetch email</button>
+              <button type="button" class="btn btn-outline" id="fetch-engie-stop-otp-btn" hidden>■ Stop polling</button>
               <input type="hidden" id="engie-session-cookies">
               <input type="hidden" id="engie-factor-id">
               <input type="hidden" id="engie-user-id">
               <input type="hidden" id="engie-form-build-id">
             </div>
+            <p class="otp-polling-status" id="engie-otp-polling-status" role="status" hidden></p>
+            <p class="otp-attempt-count" id="engie-otp-attempt-count" hidden>Spark fetch attempts: 0</p>
           </form>
           <div id="fetch-engie-result" class="fetch-result" hidden></div>
         </section>
@@ -1014,11 +1022,21 @@
           </p>
           <form id="fetch-henrri-form" class="fetch-form">
             <div class="fetch-input-row">
-              <span class="cred-saved-badge" id="henrri-saved-badge" hidden>🔑 Saved</span>
+              {% if henrri_client_id_from_env and henrri_client_secret_from_env %}
+              <span class="cred-saved-badge">🔐 Environment credentials</span>
+              {% else %}
+              {% if henrri_client_id_from_env %}
+              <span class="cred-saved-badge">🔐 Client ID from environment</span>
+              {% else %}
               <input type="text" name="client_id" id="henrri-client-id" placeholder="Client ID" autocomplete="off" style="max-width:300px">
+              {% endif %}
+              {% if henrri_client_secret_from_env %}
+              <span class="cred-saved-badge">🔐 Client Secret from environment</span>
+              {% else %}
               <input type="password" name="client_secret" id="henrri-client-secret" placeholder="Client Secret" autocomplete="off" style="max-width:300px">
+              {% endif %}
+              {% endif %}
               <button type="submit" class="btn btn-primary" id="fetch-henrri-btn">📥 Fetch Invoices</button>
-              <button type="button" class="btn btn-sm btn-link cred-edit-btn" id="henrri-edit-btn" hidden>✏️</button>
             </div>
           </form>
           <div id="fetch-henrri-result" class="fetch-result" hidden></div>

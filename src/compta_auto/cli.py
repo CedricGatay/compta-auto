@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import signal
 import sys
 from pathlib import Path
@@ -34,7 +35,7 @@ def main() -> None:
     provider.add_argument("--url", required=True)
     provider.add_argument("--notes", default="")
 
-    inqom_explore = subparsers.add_parser("inqom-explore", help="Explore Inqom UI interactively")
+    subparsers.add_parser("inqom-explore", help="Explore Inqom UI interactively")
     inqom_upload = subparsers.add_parser("inqom-upload", help="Upload ready documents to Inqom")
     inqom_upload.add_argument("--dry-run", action="store_true")
     inqom_upload.add_argument("--type", choices=["purchase", "sale", "all"], default="all")
@@ -114,6 +115,12 @@ def main() -> None:
     db.init()
 
     if args.command == "web":
+        # Uvicorn configures its own loggers but does not enable INFO records
+        # from application modules by default. OTP polling uses those modules.
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        )
         # Force immediate exit on second CTRL+C
         original_sigint = signal.getsignal(signal.SIGINT)
 
